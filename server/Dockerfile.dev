@@ -10,6 +10,13 @@ WORKDIR /app
 COPY ./skillhub-app/target/*.jar app.jar
 
 RUN chown -R app:app /app
+
+# Pre-create the local storage volume mount point with correct owner.
+# When Docker mounts an empty named volume here on first run, it copies the
+# directory's ownership from the image — without this the app user can't write
+# and built-in skill init fails with AccessDeniedException.
+RUN mkdir -p /var/lib/skillhub/storage && chown -R app:app /var/lib/skillhub
+
 USER app
 
 EXPOSE 8080

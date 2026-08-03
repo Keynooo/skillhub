@@ -1,5 +1,8 @@
-# 仅用于本地 release 验证：修正 scanner 的 busybox wget 在 uvicorn keep-alive 上挂起的 healthcheck。
-# scanner 应用本身健康（/health 返回 200），用 python 探测即可。
+# 本地 release 验证 override：
+#   1. scanner 的 busybox wget 在 uvicorn keep-alive 上挂起，应用本身健康（/health 返回 200），
+#      改用 python 探测。
+#   2. Docker Desktop 全局走代理（host.docker.internal:7890），容器内 wget 探 localhost 也被劫持
+#      返 502 → server/web healthcheck 永远 unhealthy。给两个服务加 NO_PROXY 绕过本地探测。
 services:
   skill-scanner:
     healthcheck:
@@ -8,3 +11,26 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+
+  server:
+    environment:
+      NO_PROXY: localhost,127.0.0.1
+      no_proxy: localhost,127.0.0.1
+    healthcheck:
+      # busybox wget 不认 NO_PROXY，只能在命令里临时清空代理 env 探测
+      test: ["CMD", "sh", "-c", "http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 60s
+
+  web:
+    environment:
+      NO_PROXY: localhost,127.0.0.1
+      no_proxy: localhost,127.0.0.1
+    healthcheck:
+      test: ["CMD", "sh", "-c", "http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= wget -qO- http://127.0.0.1/nginx-health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
