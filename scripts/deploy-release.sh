@@ -29,6 +29,7 @@ set +H  # 关 histexpand，避免 !2026 之类触发 bash 历史扩展
 : "${PG_PWD:?需要 PG_PWD=数据库密码}"
 IMAGE_TAG="${IMAGE_TAG:-v0.1.1}"
 GHCR_USER="${GHCR_USER:-Keynooo}"
+GHCR_USER_LC="$(echo "$GHCR_USER" | tr '[:upper:]' '[:lower:]')"  # 镜像名必须小写
 
 # 必须在仓库根
 if [[ ! -f .env.release.example ]]; then
@@ -49,7 +50,7 @@ echo "==> 2/4 填镜像名/IP/密码"
 # 生成下载限流签名密钥（32 字节随机串，校验器拒绝占位值且要求≥32字符）
 ANON_SECRET=$(openssl rand -hex 32)
 sed -i \
-  -e "s|ghcr.io/iflytek/|ghcr.io/${GHCR_USER}/|g" \
+  -e "s|ghcr.io/iflytek/|ghcr.io/${GHCR_USER_LC}/|g" \
   -e "s|SKILLHUB_VERSION=latest|SKILLHUB_VERSION=${IMAGE_TAG}|" \
   -e "s|SKILLHUB_PUBLIC_BASE_URL=http://localhost|SKILLHUB_PUBLIC_BASE_URL=http://${SERVER_IP}|" \
   -e "s|change-this-postgres-password|${PG_PWD}|" \
@@ -83,7 +84,6 @@ echo "==> 4/4 起 release 栈（首次拉镜像约 5-15 分钟）"
 if [[ -n "${GITHUB_PAT:-}" ]]; then
   echo "$GITHUB_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 fi
-
 docker compose --env-file .env.release \
   -f compose.release.yml \
   -f compose.verify.yml \
