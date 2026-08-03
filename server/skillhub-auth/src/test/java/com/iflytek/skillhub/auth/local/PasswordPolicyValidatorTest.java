@@ -17,7 +17,8 @@ class PasswordPolicyValidatorTest {
 
     @Test
     void tooShort_fails() {
-        assertThat(validator.validate("Ab1!xyz")).containsExactly("error.auth.local.password.tooShort");
+        // MIN_LENGTH=6，5 位应触发 tooShort
+        assertThat(validator.validate("Ab1!x")).containsExactly("error.auth.local.password.tooShort");
     }
 
     @Test
@@ -26,13 +27,20 @@ class PasswordPolicyValidatorTest {
     }
 
     @Test
-    void twoCharTypes_fails() {
-        assertThat(validator.validate("abcdefgh1")).containsExactly("error.auth.local.password.tooWeak");
+    void twoCharTypes_passes() {
+        // 规则放宽后，2 种字符类型（小写 + 数字）合法
+        assertThat(validator.validate("abcdef1")).isEmpty();
+    }
+
+    @Test
+    void singleCharType_passes() {
+        // 规则放宽后，单一字符类型（纯小写字母）只要长度够 6 位就合法
+        assertThat(validator.validate("abcdef")).isEmpty();
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"Abcdefg1", "Abcdef1!", "abcdef1!", "ABCDEF1!"})
-    void threeCharTypes_pass(String password) {
+    void multiCharTypes_pass(String password) {
         assertThat(validator.validate(password)).isEmpty();
     }
 }

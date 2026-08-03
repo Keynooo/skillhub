@@ -10,9 +10,11 @@ import org.springframework.stereotype.Component;
 @Component
 public class PasswordPolicyValidator {
 
-    private static final int MIN_LENGTH = 8;
+    private static final int MIN_LENGTH = 6;
     private static final int MAX_LENGTH = 128;
-    private static final int MIN_CHAR_TYPES = 3;
+    // 字符类型种数下限：放宽到 1（原本 3 种）。只要长度够 6 位即可，
+    // 不再强制要求大写/小写/数字/特殊符号混用。
+    private static final int MIN_CHAR_TYPES = 1;
 
     public List<String> validate(String password) {
         List<String> errors = new ArrayList<>();
