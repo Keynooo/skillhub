@@ -103,7 +103,7 @@ public class LocalAuthController extends BaseApiController {
     }
 
     @PostMapping("/password-reset/request")
-    @RateLimit(category = "auth-password-reset-request", authenticated = 8, anonymous = 5, windowSeconds = 300)
+    @RateLimit(category = "auth-password-reset-request", authenticated = 8, anonymous = 5, windowSeconds = 180)
     public ApiResponse<Void> requestPasswordReset(@Valid @RequestBody PasswordResetRequestDto request) {
         passwordResetService.requestPasswordReset(request.email());
         return ok("response.auth.password.reset.requested", null);

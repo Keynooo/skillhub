@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authApi } from '@/api/client'
 import { Button } from '@/shared/ui/button'
@@ -20,7 +20,18 @@ export function ResetPasswordPage() {
   const [isSuccess, setIsSuccess] = useState(false)
   const [codeSentMessage, setCodeSentMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const COOLDOWN_SECONDS = 5
+  const [resendCooldown, setResendCooldown] = useState(0)
   const emailPattern = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+
+  // 点过一次“发送验证码”后，按钮冷却倒计时，防止重复点击刷邮件
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const timer = setInterval(() => {
+      setResendCooldown((previous) => (previous <= 1 ? 0 : previous - 1))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [resendCooldown])
 
   async function handleSendCode() {
     const normalizedEmail = email.trim().toLowerCase()
@@ -39,6 +50,7 @@ export function ResetPasswordPage() {
     try {
       await authApi.requestPasswordReset({ email: normalizedEmail })
       setCodeSentMessage(t('resetPassword.codeSentMessage'))
+      setResendCooldown(COOLDOWN_SECONDS)
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : t('resetPassword.genericError'))
     } finally {
@@ -122,12 +134,16 @@ export function ResetPasswordPage() {
                   />
                   <Button
                     className="sm:w-auto"
-                    disabled={isSendingCode || isSubmitting}
+                    disabled={isSendingCode || isSubmitting || resendCooldown > 0}
                     type="button"
                     variant="outline"
                     onClick={handleSendCode}
                   >
-                    {isSendingCode ? t('resetPassword.sendingCode') : t('resetPassword.sendCode')}
+                    {isSendingCode
+                      ? t('resetPassword.sendingCode')
+                      : resendCooldown > 0
+                        ? t('resetPassword.resendCooldown', { seconds: resendCooldown })
+                        : t('resetPassword.sendCode')}
                   </Button>
                 </div>
               </div>

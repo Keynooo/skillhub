@@ -39,6 +39,19 @@ services:
       timeout: 5s
       retries: 5
 
+  # 开发用假邮件服务器：拦截后端发出的邮件，在 http://localhost:8025 查看。
+  # 生产不要用（不会真发邮件），生产靠 .env.release 的 SPRING_MAIL_* 连真 SMTP。
+  mailpit:
+    image: ${MAILPIT_IMAGE:-axllent/mailpit:latest}
+    ports:
+      - "1025:1025"   # SMTP —— 后端 spring.mail 连 localhost:1025
+      - "8025:8025"   # Web UI —— 浏览器看拦截到的邮件/验证码
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8025/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   minio:
     image: ${MINIO_IMAGE:-minio/minio:latest}
     ports:

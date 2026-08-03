@@ -22,6 +22,10 @@ spring:
           github:
             client-id: ${OAUTH2_GITHUB_CLIENT_ID:local-placeholder}
             client-secret: ${OAUTH2_GITHUB_CLIENT_SECRET:local-placeholder}
+  mail:
+    # dev 用 docker-compose 里的 mailpit（localhost:1025），忘记密码等邮件在 http://localhost:8025 查看
+    host: localhost
+    port: 1025
 
 skillhub:
   auth:

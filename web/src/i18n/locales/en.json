@@ -268,6 +268,7 @@
     "sendCode": "Send Verification Code",
     "sendingCode": "Sending...",
     "codeSentMessage": "If the account is eligible, a verification code has been sent.",
+    "resendCooldown": "Resend ({{seconds}}s)",
     "codeRequired": "Please enter the verification code",
     "newPassword": "New Password",
     "newPasswordPlaceholder": "Enter new password",
