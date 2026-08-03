@@ -27,7 +27,7 @@ export default defineConfig({
     hookTimeout: 30000,
   },
   server: {
-    port: 3000,
+    port: 9001,
     watch: {
       usePolling: true,
       interval: 150,
