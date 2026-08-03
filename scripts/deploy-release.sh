@@ -46,12 +46,17 @@ echo "==> 1/4 从模板生成 .env.release"
 cp .env.release.example .env.release
 
 echo "==> 2/4 填镜像名/IP/密码"
+# 生成下载限流签名密钥（32 字节随机串，校验器拒绝占位值且要求≥32字符）
+ANON_SECRET=$(openssl rand -hex 32)
 sed -i \
   -e "s|ghcr.io/iflytek/|ghcr.io/${GHCR_USER}/|g" \
   -e "s|SKILLHUB_VERSION=latest|SKILLHUB_VERSION=${IMAGE_TAG}|" \
   -e "s|SKILLHUB_PUBLIC_BASE_URL=http://localhost|SKILLHUB_PUBLIC_BASE_URL=http://${SERVER_IP}|" \
   -e "s|change-this-postgres-password|${PG_PWD}|" \
   -e "s|BOOTSTRAP_ADMIN_PASSWORD=ChangeMe!2026|BOOTSTRAP_ADMIN_PASSWORD=${ADMIN_PWD}|" \
+  -e "s|SKILLHUB_DOWNLOAD_ANON_COOKIE_SECRET=replace-with-random-download-secret-32-bytes|SKILLHUB_DOWNLOAD_ANON_COOKIE_SECRET=${ANON_SECRET}|" \
+  -e "s|SKILLHUB_STORAGE_S3_ACCESS_KEY=replace-me|SKILLHUB_STORAGE_S3_ACCESS_KEY=local-not-used|" \
+  -e "s|SKILLHUB_STORAGE_S3_SECRET_KEY=replace-me|SKILLHUB_STORAGE_S3_SECRET_KEY=local-not-used|" \
   .env.release
 
 cat >> .env.release <<'SMTP_EOF'
