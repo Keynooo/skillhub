@@ -1,0 +1,10 @@
+# 仅用于本地 release 验证：修正 scanner 的 busybox wget 在 uvicorn keep-alive 上挂起的 healthcheck。
+# scanner 应用本身健康（/health 返回 200），用 python 探测即可。
+services:
+  skill-scanner:
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
