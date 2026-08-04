@@ -58,6 +58,8 @@ sed -i \
   -e "s|SKILLHUB_DOWNLOAD_ANON_COOKIE_SECRET=replace-with-random-download-secret-32-bytes|SKILLHUB_DOWNLOAD_ANON_COOKIE_SECRET=${ANON_SECRET}|" \
   -e "s|SKILLHUB_STORAGE_S3_ACCESS_KEY=replace-me|SKILLHUB_STORAGE_S3_ACCESS_KEY=local-not-used|" \
   -e "s|SKILLHUB_STORAGE_S3_SECRET_KEY=replace-me|SKILLHUB_STORAGE_S3_SECRET_KEY=local-not-used|" \
+  -e "s|^WEB_PORT=.*|WEB_PORT=9001|" \
+  -e "s|^API_PORT=.*|API_PORT=8080|" \
   .env.release
 
 cat >> .env.release <<'SMTP_EOF'
