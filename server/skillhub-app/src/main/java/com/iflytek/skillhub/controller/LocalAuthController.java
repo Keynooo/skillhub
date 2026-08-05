@@ -1,5 +1,6 @@
 package com.iflytek.skillhub.controller;
 
+import com.iflytek.skillhub.auth.local.AccountActivationService;
 import com.iflytek.skillhub.auth.local.LocalAuthService;
 import com.iflytek.skillhub.auth.local.PasswordResetService;
 import com.iflytek.skillhub.auth.exception.AuthFlowException;
@@ -13,18 +14,22 @@ import com.iflytek.skillhub.dto.LocalLoginRequest;
 import com.iflytek.skillhub.dto.LocalRegisterRequest;
 import com.iflytek.skillhub.dto.PasswordResetConfirmRequest;
 import com.iflytek.skillhub.dto.PasswordResetRequestDto;
+import com.iflytek.skillhub.dto.RegistrationSendCodeRequest;
 import com.iflytek.skillhub.exception.UnauthorizedException;
 import com.iflytek.skillhub.metrics.SkillHubMetrics;
 import com.iflytek.skillhub.ratelimit.RateLimit;
 import com.iflytek.skillhub.security.AuthFailureThrottleService;
 import com.iflytek.skillhub.service.AuthMeResponseAssembler;
+import java.util.Map;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -39,6 +44,7 @@ public class LocalAuthController extends BaseApiController {
     private final PlatformSessionService platformSessionService;
     private final AuthFailureThrottleService authFailureThrottleService;
     private final PasswordResetService passwordResetService;
+    private final AccountActivationService accountActivationService;
     private final AuthMeResponseAssembler authMeResponseAssembler;
 
     public LocalAuthController(ApiResponseFactory responseFactory,
@@ -47,6 +53,7 @@ public class LocalAuthController extends BaseApiController {
                                PlatformSessionService platformSessionService,
                                AuthFailureThrottleService authFailureThrottleService,
                                PasswordResetService passwordResetService,
+                               AccountActivationService accountActivationService,
                                AuthMeResponseAssembler authMeResponseAssembler) {
         super(responseFactory);
         this.localAuthService = localAuthService;
@@ -54,6 +61,7 @@ public class LocalAuthController extends BaseApiController {
         this.platformSessionService = platformSessionService;
         this.authFailureThrottleService = authFailureThrottleService;
         this.passwordResetService = passwordResetService;
+        this.accountActivationService = accountActivationService;
         this.authMeResponseAssembler = authMeResponseAssembler;
     }
 
@@ -61,10 +69,24 @@ public class LocalAuthController extends BaseApiController {
     @RateLimit(category = "auth-register", authenticated = 10, anonymous = 5, windowSeconds = 300)
     public ApiResponse<AuthMeResponse> register(@Valid @RequestBody LocalRegisterRequest request,
                                                 HttpServletRequest httpRequest) {
-        PlatformPrincipal principal = localAuthService.register(request.username(), request.password(), request.email());
+        PlatformPrincipal principal = localAuthService.register(
+            request.username(), request.password(), request.email(), request.code());
         skillHubMetrics.incrementUserRegister();
         platformSessionService.establishSession(principal, httpRequest);
         return ok("response.success.created", authMeResponseAssembler.from(principal));
+    }
+
+    @PostMapping("/register/send-code")
+    @RateLimit(category = "auth-register-send-code", authenticated = 10, anonymous = 5, windowSeconds = 180)
+    public ApiResponse<Void> sendRegistrationCode(@Valid @RequestBody RegistrationSendCodeRequest request) {
+        accountActivationService.sendRegistrationCode(request.email());
+        return ok("response.auth.local.register.code.sent", null);
+    }
+
+    @GetMapping("/check-username")
+    @RateLimit(category = "auth-check-username", authenticated = 30, anonymous = 20, windowSeconds = 60)
+    public ApiResponse<Map<String, Boolean>> checkUsername(@RequestParam String username) {
+        return ok("response.success.read", Map.of("available", localAuthService.isUsernameAvailable(username)));
     }
 
     @PostMapping("/login")

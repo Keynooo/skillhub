@@ -54,6 +54,7 @@ export interface LocalLoginRequest {
 
 export interface LocalRegisterRequest extends LocalLoginRequest {
   email: string
+  code: string
 }
 
 export interface ChangePasswordRequest {
@@ -69,6 +70,10 @@ export interface PasswordResetConfirmRequest {
   email: string
   code: string
   newPassword: string
+}
+
+export interface RegistrationSendCodeRequest {
+  email: string
 }
 
 export type CreateNamespaceRequest = Omit<components['schemas']['NamespaceRequest'], 'slug' | 'displayName'> & {

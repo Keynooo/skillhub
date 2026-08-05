@@ -1,7 +1,7 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ApiError } from '@/api/client'
+import { ApiError, authApi } from '@/api/client'
 import { LoginButton } from '@/features/auth/login-button'
 import { useLocalRegister } from '@/features/auth/use-local-auth'
 import { Button } from '@/shared/ui/button'
@@ -11,11 +11,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
 const USERNAME_PATTERN = /^[A-Za-z0-9_]{3,64}$/
 const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+const COOLDOWN_SECONDS = 5
 
 type RegisterFieldErrors = {
   username?: string
   email?: string
   password?: string
+  confirmPassword?: string
+  code?: string
 }
 
 function isDuplicateUsernameError(errorKey: string) {
@@ -41,52 +44,75 @@ export function RegisterPage() {
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [code, setCode] = useState('')
   const [fieldErrors, setFieldErrors] = useState<RegisterFieldErrors>({})
   const [formError, setFormError] = useState<string | null>(null)
+  const [isSendingCode, setIsSendingCode] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
+  const [codeSentMessage, setCodeSentMessage] = useState<string | null>(null)
 
   const returnTo = search.returnTo && search.returnTo.startsWith('/') ? search.returnTo : '/dashboard'
 
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const timer = setInterval(() => {
+      setResendCooldown((previous) => (previous <= 1 ? 0 : previous - 1))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [resendCooldown])
+
   function validateUsername(value: string) {
     const trimmed = value.trim()
-    if (!trimmed) {
-      return t('register.usernameRequired')
-    }
-    if (!USERNAME_PATTERN.test(trimmed)) {
-      return t('register.usernameInvalid')
-    }
+    if (!trimmed) return t('register.usernameRequired')
+    if (!USERNAME_PATTERN.test(trimmed)) return t('register.usernameInvalid')
     return undefined
   }
 
   function validateEmail(value: string) {
     const trimmed = value.trim().toLowerCase()
-    if (!trimmed) {
-      return t('register.emailRequired')
-    }
-    if (!EMAIL_PATTERN.test(trimmed)) {
-      return t('register.emailInvalid')
-    }
+    if (!trimmed) return t('register.emailRequired')
+    if (!EMAIL_PATTERN.test(trimmed)) return t('register.emailInvalid')
     return undefined
   }
 
   function validatePassword(value: string) {
-    if (!value) {
-      return t('register.passwordRequired')
-    }
-    if (value.length < 6) {
-      return t('register.passwordTooShort')
-    }
+    if (!value) return t('register.passwordRequired')
+    if (value.length < 6) return t('register.passwordTooShort')
     return undefined
+  }
+
+  function validateConfirmPassword(value: string) {
+    if (!value) return t('register.confirmPasswordRequired')
+    if (value !== password) return t('register.passwordMismatch')
+    return undefined
+  }
+
+  function validateCode(value: string) {
+    if (!value.trim()) return t('register.codeRequired')
+    return undefined
+  }
+
+  // Real-time username availability check on blur.
+  async function checkUsernameAvailability(value: string) {
+    const trimmed = value.trim()
+    if (!trimmed || !USERNAME_PATTERN.test(trimmed)) return
+    try {
+      const available = await authApi.checkUsername(trimmed)
+      setFieldErrors((current) => ({
+        ...current,
+        username: available ? undefined : t('register.usernameExists'),
+      }))
+    } catch {
+      // Ignore lookup failures — final check happens at submit on the server.
+    }
   }
 
   function mapRegisterApiError(error: unknown): { fieldErrors?: RegisterFieldErrors, formError?: string } {
     if (!(error instanceof ApiError)) {
-      return {
-        formError: error instanceof Error ? error.message : t('apiError.unknown'),
-      }
+      return { formError: error instanceof Error ? error.message : t('apiError.unknown') }
     }
-
     const errorKey = error.serverMessageKey ?? error.serverMessage ?? error.message
-
     switch (errorKey) {
       case 'validation.auth.local.username.notBlank':
         return { fieldErrors: { username: t('register.usernameRequired') } }
@@ -106,6 +132,8 @@ export function RegisterPage() {
         return { fieldErrors: { username: t('register.usernameExists') } }
       case 'error.auth.local.email.exists':
         return { fieldErrors: { email: t('register.emailExists') } }
+      case 'error.auth.local.activation.invalid.code':
+        return { fieldErrors: { code: t('register.codeInvalid') } }
       default:
         if (isDuplicateUsernameError(errorKey)) {
           return { fieldErrors: { username: t('register.usernameExists') } }
@@ -114,6 +142,30 @@ export function RegisterPage() {
           return { fieldErrors: { email: t('register.emailExists') } }
         }
         return { formError: error.serverMessage || error.message || t('apiError.unknown') }
+    }
+  }
+
+  async function handleSendCode() {
+    const trimmedEmail = email.trim().toLowerCase()
+    const emailError = validateEmail(trimmedEmail)
+    if (emailError) {
+      setFieldErrors((current) => ({ ...current, email: emailError }))
+      return
+    }
+    setIsSendingCode(true)
+    setFieldErrors((current) => ({ ...current, email: undefined }))
+    setFormError(null)
+    setCodeSentMessage(null)
+    try {
+      await authApi.sendRegistrationCode({ email: trimmedEmail })
+      setCodeSentMessage(t('register.codeSent'))
+      setResendCooldown(COOLDOWN_SECONDS)
+    } catch (error) {
+      const { fieldErrors: nextApiFieldErrors, formError: nextFormError } = mapRegisterApiError(error)
+      setFieldErrors(nextApiFieldErrors ?? {})
+      setFormError(nextFormError ?? null)
+    } finally {
+      setIsSendingCode(false)
     }
   }
 
@@ -126,8 +178,10 @@ export function RegisterPage() {
     nextFieldErrors.username = validateUsername(username)
     nextFieldErrors.email = validateEmail(email)
     nextFieldErrors.password = validatePassword(password)
+    nextFieldErrors.confirmPassword = validateConfirmPassword(confirmPassword)
+    nextFieldErrors.code = validateCode(code)
 
-    if (nextFieldErrors.username || nextFieldErrors.email || nextFieldErrors.password) {
+    if (Object.values(nextFieldErrors).some(Boolean)) {
       setFieldErrors(nextFieldErrors)
       setFormError(null)
       registerMutation.reset()
@@ -137,7 +191,7 @@ export function RegisterPage() {
     setFieldErrors({})
     setFormError(null)
     try {
-      await registerMutation.mutateAsync({ username: trimmedUsername, email: trimmedEmail, password })
+      await registerMutation.mutateAsync({ username: trimmedUsername, email: trimmedEmail, password, code })
       await navigate({ to: returnTo })
     } catch (error) {
       const { fieldErrors: nextApiFieldErrors, formError: nextFormError } = mapRegisterApiError(error)
@@ -179,34 +233,53 @@ export function RegisterPage() {
                     placeholder={t('register.usernamePlaceholder')}
                     aria-invalid={fieldErrors.username ? 'true' : 'false'}
                     onBlur={() => {
-                      setFieldErrors((current) => ({ ...current, username: validateUsername(username) }))
+                      const formatError = validateUsername(username)
+                      setFieldErrors((current) => ({ ...current, username: formatError }))
+                      if (!formatError) {
+                        checkUsernameAvailability(username)
+                      }
                     }}
                   />
                   {fieldErrors.username ? <p className="text-sm text-red-600">{fieldErrors.username}</p> : null}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium" htmlFor="register-email">{t('register.email')}</label>
-                  <Input
-                    id="register-email"
-                    type="email"
-                    autoComplete="email"
-                    value={email}
-                    onChange={(event) => {
-                      setEmail(event.target.value)
-                      if (fieldErrors.email || formError) {
-                        setFieldErrors((current) => ({ ...current, email: undefined }))
-                        setFormError(null)
-                        registerMutation.reset()
-                      }
-                    }}
-                    placeholder={t('register.emailPlaceholder')}
-                    required
-                    aria-invalid={fieldErrors.email ? 'true' : 'false'}
-                    onBlur={() => {
-                      setFieldErrors((current) => ({ ...current, email: validateEmail(email) }))
-                    }}
-                  />
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      id="register-email"
+                      type="email"
+                      autoComplete="email"
+                      value={email}
+                      onChange={(event) => {
+                        setEmail(event.target.value)
+                        if (fieldErrors.email || formError) {
+                          setFieldErrors((current) => ({ ...current, email: undefined }))
+                          setFormError(null)
+                          registerMutation.reset()
+                        }
+                      }}
+                      placeholder={t('register.emailPlaceholder')}
+                      aria-invalid={fieldErrors.email ? 'true' : 'false'}
+                      onBlur={() => {
+                        setFieldErrors((current) => ({ ...current, email: validateEmail(email) }))
+                      }}
+                    />
+                    <Button
+                      className="sm:w-auto"
+                      disabled={isSendingCode || registerMutation.isPending || resendCooldown > 0}
+                      type="button"
+                      variant="outline"
+                      onClick={handleSendCode}
+                    >
+                      {isSendingCode
+                        ? t('register.sendingCode')
+                        : resendCooldown > 0
+                          ? t('register.resendCooldown', { seconds: resendCooldown })
+                          : t('register.sendCode')}
+                    </Button>
+                  </div>
                   {fieldErrors.email ? <p className="text-sm text-red-600">{fieldErrors.email}</p> : null}
+                  {codeSentMessage ? <p className="text-sm text-emerald-700">{codeSentMessage}</p> : null}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium" htmlFor="register-password">{t('register.password')}</label>
@@ -230,6 +303,48 @@ export function RegisterPage() {
                     }}
                   />
                   {fieldErrors.password ? <p className="text-sm text-red-600">{fieldErrors.password}</p> : null}
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium" htmlFor="register-confirm-password">{t('register.confirmPassword')}</label>
+                  <Input
+                    id="register-confirm-password"
+                    type="password"
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(event) => {
+                      setConfirmPassword(event.target.value)
+                      if (fieldErrors.confirmPassword || formError) {
+                        setFieldErrors((current) => ({ ...current, confirmPassword: undefined }))
+                        setFormError(null)
+                        registerMutation.reset()
+                      }
+                    }}
+                    placeholder={t('register.confirmPasswordPlaceholder')}
+                    aria-invalid={fieldErrors.confirmPassword ? 'true' : 'false'}
+                    onBlur={() => {
+                      setFieldErrors((current) => ({ ...current, confirmPassword: validateConfirmPassword(confirmPassword) }))
+                    }}
+                  />
+                  {fieldErrors.confirmPassword ? <p className="text-sm text-red-600">{fieldErrors.confirmPassword}</p> : null}
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium" htmlFor="register-code">{t('register.code')}</label>
+                  <Input
+                    id="register-code"
+                    value={code}
+                    onChange={(event) => {
+                      setCode(event.target.value)
+                      if (fieldErrors.code || formError) {
+                        setFieldErrors((current) => ({ ...current, code: undefined }))
+                        setFormError(null)
+                        registerMutation.reset()
+                      }
+                    }}
+                    placeholder={t('register.codePlaceholder')}
+                    autoComplete="one-time-code"
+                    aria-invalid={fieldErrors.code ? 'true' : 'false'}
+                  />
+                  {fieldErrors.code ? <p className="text-sm text-red-600">{fieldErrors.code}</p> : null}
                 </div>
                 {formError ? <p className="text-sm text-red-600">{formError}</p> : null}
                 <Button className="w-full" disabled={registerMutation.isPending} type="submit">

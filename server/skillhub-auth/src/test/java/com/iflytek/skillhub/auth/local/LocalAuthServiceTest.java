@@ -51,6 +51,9 @@ class LocalAuthServiceTest {
     @Mock
     private PasswordEncoder passwordEncoder;
 
+    @Mock
+    private AccountActivationService accountActivationService;
+
     private LocalAuthService service;
 
     @BeforeEach
@@ -62,28 +65,28 @@ class LocalAuthServiceTest {
             globalNamespaceMembershipService,
             new PasswordPolicyValidator(),
             passwordEncoder,
-            CLOCK
+            CLOCK,
+            accountActivationService
         );
     }
 
     @Test
-    void register_createsUserAndCredential() {
+    void register_withVerifiedCode_createsActiveUser() {
         given(credentialRepository.existsByUsernameIgnoreCase("alice")).willReturn(false);
         given(userAccountRepository.findByEmailIgnoreCase("alice@example.com")).willReturn(Optional.empty());
         given(passwordEncoder.encode("Abcd123!")).willReturn("encoded");
         given(userAccountRepository.save(any(UserAccount.class))).willAnswer(invocation -> invocation.getArgument(0));
         given(userRoleBindingRepository.findByUserId(any())).willReturn(List.of());
 
-        var principal = service.register("Alice", "Abcd123!", "alice@example.com");
+        var principal = service.register("Alice", "Abcd123!", "alice@example.com", "123456");
 
         ArgumentCaptor<UserAccount> userCaptor = ArgumentCaptor.forClass(UserAccount.class);
         verify(userAccountRepository).save(userCaptor.capture());
-        assertThat(userCaptor.getValue().getDisplayName()).isEqualTo("alice");
-        assertThat(principal.displayName()).isEqualTo("alice");
-        assertThat(principal.email()).isEqualTo("alice@example.com");
-        assertThat(principal.platformRoles()).containsExactly("USER");
+        assertThat(userCaptor.getValue().getStatus()).isEqualTo(UserStatus.ACTIVE);
+        verify(accountActivationService).verifyAndConsumeCode("alice@example.com", "123456");
         verify(credentialRepository).save(any(LocalCredential.class));
         verify(globalNamespaceMembershipService).ensureMember(userCaptor.getValue().getId());
+        assertThat(principal.displayName()).isEqualTo("alice");
     }
 
     @Test
@@ -231,6 +234,40 @@ class LocalAuthServiceTest {
     }
 
     @Test
+    void login_withEmail_resolvesCredentialViaUserAccount() {
+        LocalCredential credential = new LocalCredential("usr_1", "alice", "encoded");
+        UserAccount user = new UserAccount("usr_1", "alice", "alice@example.com", null);
+
+        given(credentialRepository.findByUsernameIgnoreCase("alice@example.com")).willReturn(Optional.empty());
+        given(userAccountRepository.findByEmailIgnoreCase("alice@example.com")).willReturn(Optional.of(user));
+        given(credentialRepository.findByUserId("usr_1")).willReturn(Optional.of(credential));
+        given(userAccountRepository.findById("usr_1")).willReturn(Optional.of(user));
+        given(passwordEncoder.matches("Abcd123!", "encoded")).willReturn(true);
+        given(userRoleBindingRepository.findByUserId("usr_1")).willReturn(List.of());
+
+        var principal = service.login("alice@example.com", "Abcd123!");
+
+        assertThat(principal.displayName()).isEqualTo("alice");
+        assertThat(principal.email()).isEqualTo("alice@example.com");
+    }
+
+    @Test
+    void login_withUnknownEmail_stillPerformsDummyPasswordCheck() {
+        given(credentialRepository.findByUsernameIgnoreCase("ghost@example.com")).willReturn(Optional.empty());
+        given(userAccountRepository.findByEmailIgnoreCase("ghost@example.com")).willReturn(Optional.empty());
+        given(passwordEncoder.matches(eq("bad"), eq("$2a$12$8Q/2o2A0V.b18G2DutV4c.s5zZxH6MECM7tP8mYv6b6Q6x6o9v3vu")))
+            .willReturn(false);
+
+        assertThatThrownBy(() -> service.login("ghost@example.com", "bad"))
+            .isInstanceOf(AuthFlowException.class)
+            .extracting("status")
+            .isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        verify(passwordEncoder).matches("bad", "$2a$12$8Q/2o2A0V.b18G2DutV4c.s5zZxH6MECM7tP8mYv6b6Q6x6o9v3vu");
+        verify(credentialRepository, never()).findByUserId(any());
+    }
+
+    @Test
     void changePassword_withoutLocalCredential_rejectsRequest() {
         given(credentialRepository.findByUserId("oauth-only")).willReturn(Optional.empty());
 
@@ -248,7 +285,7 @@ class LocalAuthServiceTest {
     void register_rejectsInvalidEmailFormat() {
         given(credentialRepository.existsByUsernameIgnoreCase("alice")).willReturn(false);
 
-        assertThatThrownBy(() -> service.register("Alice", "Abcd123!", "not-an-email"))
+        assertThatThrownBy(() -> service.register("Alice", "Abcd123!", "not-an-email", "123456"))
             .isInstanceOf(AuthFlowException.class)
             .hasMessageContaining("validation.auth.local.email.invalid");
     }
@@ -257,7 +294,7 @@ class LocalAuthServiceTest {
     void register_rejectsBlankEmail() {
         given(credentialRepository.existsByUsernameIgnoreCase("alice")).willReturn(false);
 
-        assertThatThrownBy(() -> service.register("Alice", "Abcd123!", "   "))
+        assertThatThrownBy(() -> service.register("Alice", "Abcd123!", "   ", "123456"))
             .isInstanceOf(AuthFlowException.class)
             .hasMessageContaining("validation.auth.local.email.notBlank");
     }

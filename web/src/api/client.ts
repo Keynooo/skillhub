@@ -2,6 +2,7 @@ import createClient from 'openapi-fetch'
 import type { paths } from './generated/schema'
 import type {
   ChangePasswordRequest,
+  RegistrationSendCodeRequest,
   PasswordResetConfirmRequest,
   PasswordResetRequest,
   ApiToken,
@@ -348,6 +349,23 @@ export const authApi = {
       }),
       body: JSON.stringify(request),
     })
+  },
+
+  async sendRegistrationCode(request: RegistrationSendCodeRequest): Promise<void> {
+    await fetchJson<void>('/api/v1/auth/local/register/send-code', {
+      method: 'POST',
+      headers: await ensureCsrfHeaders({
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify(request),
+    })
+  },
+
+  async checkUsername(username: string): Promise<boolean> {
+    const result = await fetchJson<{ available: boolean }>(
+      `/api/v1/auth/local/check-username?username=${encodeURIComponent(username)}`,
+    )
+    return result.available
   },
 
   async changePassword(request: ChangePasswordRequest): Promise<void> {

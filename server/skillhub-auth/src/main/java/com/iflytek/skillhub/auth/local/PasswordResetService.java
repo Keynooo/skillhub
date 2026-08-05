@@ -87,7 +87,7 @@ public class PasswordResetService {
                 null
         ));
 
-        sendVerificationCodeEmail(user.getEmail(), code, false);
+        sendVerificationCodeEmail(user.getEmail(), code, true);
     }
 
     /**

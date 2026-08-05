@@ -44,6 +44,7 @@ public class LocalAuthService {
     private final PasswordPolicyValidator passwordPolicyValidator;
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
+    private final AccountActivationService accountActivationService;
 
     public LocalAuthService(LocalCredentialRepository credentialRepository,
                             UserAccountRepository userAccountRepository,
@@ -51,7 +52,8 @@ public class LocalAuthService {
                             GlobalNamespaceMembershipService globalNamespaceMembershipService,
                             PasswordPolicyValidator passwordPolicyValidator,
                             PasswordEncoder passwordEncoder,
-                            Clock clock) {
+                            Clock clock,
+                            AccountActivationService accountActivationService) {
         this.credentialRepository = credentialRepository;
         this.userAccountRepository = userAccountRepository;
         this.userRoleBindingRepository = userRoleBindingRepository;
@@ -59,14 +61,16 @@ public class LocalAuthService {
         this.passwordPolicyValidator = passwordPolicyValidator;
         this.passwordEncoder = passwordEncoder;
         this.clock = clock;
+        this.accountActivationService = accountActivationService;
     }
 
     /**
-     * Registers a new local user, creates the credential record, and ensures
-     * the user is enrolled in the global namespace.
+     * Registers a new local user. The email must first be verified via a
+     * one-time code (see {@link AccountActivationService#sendRegistrationCode});
+     * once the code checks out the account is created ACTIVE and ready to use.
      */
     @Transactional
-    public PlatformPrincipal register(String username, String password, String email) {
+    public PlatformPrincipal register(String username, String password, String email, String code) {
         String normalizedUsername = normalizeUsername(username);
         validateUsername(normalizedUsername);
 
@@ -76,7 +80,7 @@ public class LocalAuthService {
 
         String normalizedEmail = normalizeEmail(email);
         validateEmail(normalizedEmail);
-        if (normalizedEmail != null && userAccountRepository.findByEmailIgnoreCase(normalizedEmail).isPresent()) {
+        if (userAccountRepository.findByEmailIgnoreCase(normalizedEmail).isPresent()) {
             throw new AuthFlowException(HttpStatus.CONFLICT, "error.auth.local.email.exists");
         }
 
@@ -84,6 +88,8 @@ public class LocalAuthService {
         if (!passwordErrors.isEmpty()) {
             throw new AuthFlowException(HttpStatus.BAD_REQUEST, passwordErrors.getFirst());
         }
+
+        accountActivationService.verifyAndConsumeCode(normalizedEmail, code);
 
         UserAccount user = new UserAccount(
             "usr_" + UUID.randomUUID(),
@@ -100,8 +106,18 @@ public class LocalAuthService {
             passwordEncoder.encode(password)
         ));
         globalNamespaceMembershipService.ensureMember(user.getId());
-
         return buildPrincipal(user);
+    }
+
+    /**
+     * Whether a username is formatted correctly and not already taken.
+     */
+    public boolean isUsernameAvailable(String username) {
+        String normalized = normalizeUsername(username);
+        if (!USERNAME_PATTERN.matcher(normalized).matches()) {
+            return false;
+        }
+        return !credentialRepository.existsByUsernameIgnoreCase(normalized);
     }
 
     /**
@@ -109,10 +125,9 @@ public class LocalAuthService {
      * establish a web session.
      */
     @Transactional
-    public PlatformPrincipal login(String username, String password) {
-        String normalizedUsername = normalizeUsername(username);
-        LocalCredential credential = credentialRepository.findByUsernameIgnoreCase(normalizedUsername)
-            .orElse(null);
+    public PlatformPrincipal login(String identifier, String password) {
+        String normalizedIdentifier = normalizeUsername(identifier);
+        LocalCredential credential = resolveCredential(normalizedIdentifier);
 
         if (credential == null) {
             passwordEncoder.matches(password == null ? "" : password, DUMMY_PASSWORD_HASH);
@@ -157,6 +172,26 @@ public class LocalAuthService {
         credential.setFailedAttempts(0);
         credential.setLockedUntil(null);
         credentialRepository.save(credential);
+    }
+
+    /**
+     * Resolves a login identifier to its local credential, accepting either the
+     * account username or the bound email address. Usernames cannot contain '@',
+     * so an '@' in the input routes the lookup through the email column of
+     * {@code user_account} and then back to the credential via the user id.
+     */
+    private LocalCredential resolveCredential(String identifier) {
+        LocalCredential credential = credentialRepository.findByUsernameIgnoreCase(identifier)
+            .orElse(null);
+        if (credential != null) {
+            return credential;
+        }
+        if (identifier.indexOf('@') >= 0) {
+            return userAccountRepository.findByEmailIgnoreCase(identifier)
+                .flatMap(user -> credentialRepository.findByUserId(user.getId()))
+                .orElse(null);
+        }
+        return null;
     }
 
     private PlatformPrincipal buildPrincipal(UserAccount user) {

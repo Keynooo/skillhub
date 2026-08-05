@@ -108,7 +108,7 @@ class PasswordResetServiceTest {
     }
 
     @Test
-    void requestPasswordReset_emailFailure_doesNotThrowForAnonymousFlow() {
+    void requestPasswordReset_emailFailure_throwsForAnonymousFlow() {
         UserAccount user = new UserAccount("usr_1", "alice", "alice@example.com", null);
         given(userAccountRepository.findByEmailIgnoreCase("alice@example.com")).willReturn(Optional.of(user));
         given(credentialRepository.findByUserId("usr_1")).willReturn(
@@ -121,9 +121,10 @@ class PasswordResetServiceTest {
 
         org.mockito.Mockito.doThrow(new RuntimeException("smtp down")).when(mailSender).send(any(SimpleMailMessage.class));
 
-        service.requestPasswordReset("alice@example.com");
-
-        verify(resetRequestRepository).save(any(PasswordResetRequest.class));
+        assertThatThrownBy(() -> service.requestPasswordReset("alice@example.com"))
+                .isInstanceOf(AuthFlowException.class)
+                .extracting("status")
+                .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     @Test

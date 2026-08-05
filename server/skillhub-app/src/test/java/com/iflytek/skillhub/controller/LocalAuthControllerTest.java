@@ -6,11 +6,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.iflytek.skillhub.auth.exception.AuthFlowException;
+import com.iflytek.skillhub.auth.local.AccountActivationService;
 import com.iflytek.skillhub.auth.local.LocalAuthService;
 import com.iflytek.skillhub.auth.local.LocalCredentialRepository;
 import com.iflytek.skillhub.auth.local.PasswordResetService;
@@ -57,6 +59,9 @@ class LocalAuthControllerTest {
     private PasswordResetService passwordResetService;
 
     @MockBean
+    private AccountActivationService accountActivationService;
+
+    @MockBean
     private LocalCredentialRepository localCredentialRepository;
 
     @Test
@@ -90,22 +95,15 @@ class LocalAuthControllerTest {
 
     @Test
     void register_returnsCreatedEnvelope() throws Exception {
-        PlatformPrincipal principal = new PlatformPrincipal(
-            "usr_2",
-            "bob",
-            "bob@example.com",
-            "",
-            "local",
-            Set.of()
-        );
-        given(localAuthService.register("bob", "Abcd123!", "bob@example.com")).willReturn(principal);
+        PlatformPrincipal principal = new PlatformPrincipal("usr_2", "bob", "bob@example.com", "", "local", Set.of());
+        given(localAuthService.register("bob", "Abcd123!", "bob@example.com", "123456")).willReturn(principal);
         given(localCredentialRepository.existsByUserId("usr_2")).willReturn(true);
 
         mockMvc.perform(post("/api/v1/auth/local/register")
                 .with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                    {"username":"bob","password":"Abcd123!","email":"bob@example.com"}
+                    {"username":"bob","password":"Abcd123!","email":"bob@example.com","code":"123456"}
                     """))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(0))
@@ -115,38 +113,60 @@ class LocalAuthControllerTest {
     }
 
     @Test
+    void sendRegistrationCode_delegatesToService() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/local/register/send-code")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"email":"bob@example.com"}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(0));
+        verify(accountActivationService).sendRegistrationCode("bob@example.com");
+    }
+
+    @Test
+    void checkUsername_returnsAvailability() throws Exception {
+        given(localAuthService.isUsernameAvailable("bob")).willReturn(true);
+
+        mockMvc.perform(get("/api/v1/auth/local/check-username").param("username", "bob"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.available").value(true));
+    }
+
+    @Test
     void register_rejectsInvalidEmailFormat() throws Exception {
-        given(localAuthService.register("bob", "Abcd123!", "not-an-email"))
-            .willThrow(new AuthFlowException(HttpStatus.BAD_REQUEST, "validation.auth.local.email.invalid"));
+        willThrow(new AuthFlowException(HttpStatus.BAD_REQUEST, "validation.auth.local.email.invalid"))
+            .given(localAuthService).register("bob", "Abcd123!", "not-an-email", "123456");
 
         mockMvc.perform(post("/api/v1/auth/local/register")
                 .with(csrf())
                 .header("Accept-Language", "zh-CN")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                    {"username":"bob","password":"Abcd123!","email":"not-an-email"}
+                    {"username":"bob","password":"Abcd123!","email":"not-an-email","code":"123456"}
                     """))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value(400));
 
-        verify(localAuthService).register("bob", "Abcd123!", "not-an-email");
+        verify(localAuthService).register("bob", "Abcd123!", "not-an-email", "123456");
     }
 
     @Test
     void register_rejectsBlankEmail() throws Exception {
-        given(localAuthService.register("bob", "Abcd123!", " "))
-            .willThrow(new AuthFlowException(HttpStatus.BAD_REQUEST, "validation.auth.local.email.notBlank"));
+        willThrow(new AuthFlowException(HttpStatus.BAD_REQUEST, "validation.auth.local.email.notBlank"))
+            .given(localAuthService).register("bob", "Abcd123!", " ", "123456");
 
         mockMvc.perform(post("/api/v1/auth/local/register")
                 .with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                    {"username":"bob","password":"Abcd123!","email":" "}
+                    {"username":"bob","password":"Abcd123!","email":" ","code":"123456"}
                     """))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value(400));
 
-        verify(localAuthService).register("bob", "Abcd123!", " ");
+        verify(localAuthService).register("bob", "Abcd123!", " ", "123456");
     }
 
     @Test
