@@ -282,6 +282,25 @@ export function RegisterPage() {
                   {codeSentMessage ? <p className="text-sm text-emerald-700">{codeSentMessage}</p> : null}
                 </div>
                 <div className="space-y-2">
+                  <label className="text-sm font-medium" htmlFor="register-code">{t('register.code')}</label>
+                  <Input
+                    id="register-code"
+                    value={code}
+                    onChange={(event) => {
+                      setCode(event.target.value)
+                      if (fieldErrors.code || formError) {
+                        setFieldErrors((current) => ({ ...current, code: undefined }))
+                        setFormError(null)
+                        registerMutation.reset()
+                      }
+                    }}
+                    placeholder={t('register.codePlaceholder')}
+                    autoComplete="one-time-code"
+                    aria-invalid={fieldErrors.code ? 'true' : 'false'}
+                  />
+                  {fieldErrors.code ? <p className="text-sm text-red-600">{fieldErrors.code}</p> : null}
+                </div>
+                <div className="space-y-2">
                   <label className="text-sm font-medium" htmlFor="register-password">{t('register.password')}</label>
                   <Input
                     id="register-password"
@@ -326,25 +345,6 @@ export function RegisterPage() {
                     }}
                   />
                   {fieldErrors.confirmPassword ? <p className="text-sm text-red-600">{fieldErrors.confirmPassword}</p> : null}
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium" htmlFor="register-code">{t('register.code')}</label>
-                  <Input
-                    id="register-code"
-                    value={code}
-                    onChange={(event) => {
-                      setCode(event.target.value)
-                      if (fieldErrors.code || formError) {
-                        setFieldErrors((current) => ({ ...current, code: undefined }))
-                        setFormError(null)
-                        registerMutation.reset()
-                      }
-                    }}
-                    placeholder={t('register.codePlaceholder')}
-                    autoComplete="one-time-code"
-                    aria-invalid={fieldErrors.code ? 'true' : 'false'}
-                  />
-                  {fieldErrors.code ? <p className="text-sm text-red-600">{fieldErrors.code}</p> : null}
                 </div>
                 {formError ? <p className="text-sm text-red-600">{formError}</p> : null}
                 <Button className="w-full" disabled={registerMutation.isPending} type="submit">
