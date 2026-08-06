@@ -14,7 +14,7 @@
 #   3. git pull（更新 compose；.env.release 不受影响）
 #   4. pg_dump 备份 PostgreSQL（失败即中止）
 #   5. 改 SKILLHUB_VERSION（留 .env.release.bak）
-#   6. docker compose pull（失败自动恢复 .env.release）
+#   6. docker compose pull（只拉 server/web/scanner；postgres/redis 用本地已有的；失败自动恢复 .env.release）
 #   7. docker compose up -d --wait
 #
 # 可选环境变量:
@@ -53,6 +53,10 @@ if [[ ! -f compose.release.yml || ! -f compose.verify.yml ]]; then
 fi
 
 COMPOSE="docker compose --env-file .env.release -f compose.release.yml -f compose.verify.yml"
+# 只拉 skillhub 自家的服务（镜像 tag 跟 SKILLHUB_VERSION 走）。postgres/redis 是固定大版本
+# (postgres:16-alpine / redis:7-alpine) 的外部依赖，升级时本地已有、无需重拉；且避开
+# 受限网络下 Docker Hub 拉不动(443 / 镜像源需登录)导致整条升级失败的问题。
+APP_SERVICES="server web skill-scanner"
 MIGRATION_PATH="server/skillhub-app/src/main/resources/db/migration"
 
 CURRENT_TAG="$(grep -E '^SKILLHUB_VERSION=' .env.release | tail -1 | cut -d= -f2- | tr -d '[:space:]')"
@@ -247,8 +251,8 @@ sed -i.bak "s/^SKILLHUB_VERSION=.*/SKILLHUB_VERSION=${IMAGE_TAG}/" .env.release
 # 7. 拉镜像 + 重建容器（pull 失败则回滚 .env.release）
 # ===========================================================================
 echo ""
-echo "==> 4/4 拉取镜像"
-if ! $COMPOSE pull; then
+echo "==> 4/4 拉取镜像（仅 skillhub 服务：$APP_SERVICES）"
+if ! $COMPOSE pull $APP_SERVICES; then
   echo "" >&2
   echo "❌ 拉取镜像失败（tag ${IMAGE_TAG} 可能还没推到 GHCR），已把 .env.release 恢复到升级前。" >&2
   mv -f .env.release.bak .env.release
