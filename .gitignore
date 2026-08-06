@@ -32,6 +32,9 @@ yarn-error.log*
 .memory/
 *.local.json
 
+# upgrade-release.sh 每次升级前自动 pg_dump 出来的数据库备份（仅在服务器上生成）
+backup_*.sql
+
 # Java / Spring Boot
 .gradle/
 build/
