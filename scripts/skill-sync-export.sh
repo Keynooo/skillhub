@@ -110,13 +110,20 @@ elif [[ -z "${QINIU_BUCKET:-}" ]]; then
   echo "    ⚠️  未设 QINIU_BUCKET，跳过上传。产物已生成在 $OUT_DIR。"
   echo "       配好凭证后重跑，或本次仅本地校验（导入端可直连本机文件测试）。"
 else
-  command -v qshell >/dev/null 2>&1 || { echo "❌ 未安装 qshell（七牛 CLI），无法上传" >&2; exit 1; }
-  # 若已配过 qshell account 则可只传 BUCKET，不用重复 AK/SK
-  if [[ -n "${QINIU_AK:-}" && -n "${QINIU_SK:-}" ]]; then
-    qshell account "$QINIU_AK" "$QINIU_SK" skillhub-sync >/dev/null
-  fi
-  qshell fput "$QINIU_BUCKET" "$QINIU_KEY" "$PKG" --overwrite
-  echo "    ✅ 已上传: ${QINIU_BUCKET}/${QINIU_KEY}"
+	command -v qshell >/dev/null 2>&1 || { echo "❌ 未安装 qshell（七牛 CLI），无法上传" >&2; exit 1; }
+	# 若已配过 qshell account 则可只传 BUCKET，不用重复 AK/SK
+	if [[ -n "${QINIU_AK:-}" && -n "${QINIU_SK:-}" ]]; then
+		qshell account "$QINIU_AK" "$QINIU_SK" skillhub-sync >/dev/null
+	fi
+	# 先查远程 hash，跟本地一样就跳过（无变更不浪费上传）
+	LOCAL_HASH="$(sha256sum "$PKG" | cut -d' ' -f1)"
+	REMOTE_HASH="$(qshell stat "$QINIU_BUCKET" "$QINIU_KEY" 2>/dev/null | grep -i '^Hash:' | awk '{print $2}' || true)"
+	if [[ -n "${REMOTE_HASH:-}" && "$LOCAL_HASH" == "$REMOTE_HASH" ]]; then
+		echo "    ⊘ 跳过上传（内容未变，远程 hash: $REMOTE_HASH）"
+	else
+		qshell fput "$QINIU_BUCKET" "$QINIU_KEY" "$PKG" --overwrite
+		echo "    ✅ 已上传: ${QINIU_BUCKET}/${QINIU_KEY}"
+	fi
 fi
 
 echo ""
