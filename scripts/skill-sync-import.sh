@@ -6,11 +6,10 @@
 #   bash scripts/skill-sync-import.sh
 #
 # 环境变量:
-#   ADMIN_PASSWORD=...                     主上 admin「能登录的」密码（必填）。坑: bootstrap 只在首次
-#                                          启动建号，之后改 .env.release 的密码不会同步进库；用你实际能
-#                                          登录的那个，而不是 .env.release 里的值。
-#   MASTER_BASE_URL=http://localhost:9001   本机 API 地址（走对外 9001，nginx 代理 /api 到 server）
 #   ADMIN_USER=admin                       admin 用户名
+#   ADMIN_PASSWORD                         admin 密码（默认从 .env.release 取 BOOTSTRAP_ADMIN_PASSWORD，
+#                                          也支持环境变量覆盖，用于 .env.release 的密码跟库不一致时）
+#   MASTER_BASE_URL=http://localhost:9001   本机 API 地址（走对外 9001，nginx 代理 /api 到 server）
 #   QINIU_AK / QINIU_SK / QINIU_BUCKET     七牛凭证（除非用 SYNC_PKG 本地包）
 #   QINIU_KEY=skillhub-sync/latest.tar.gz  七牛对象 key（与导出端一致）
 #   SYNC_PKG=<path>                        直接用本地 tar 包，不走七牛（联调/离线测试用）
@@ -33,8 +32,11 @@ set +H
 COMPOSE="docker compose --env-file .env.release -f compose.release.yml -f compose.verify.yml"
 BASE="${MASTER_BASE_URL:-http://localhost:9001}"
 ADMIN_USER="${ADMIN_USER:-admin}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-ChangeMe!2026}"
 QINIU_KEY="${QINIU_KEY:-skillhub-sync/latest.tar.gz}"
+
+# admin 密码从 .env.release 取，也支持环境变量覆盖
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(grep -E '^BOOTSTRAP_ADMIN_PASSWORD=' .env.release | tail -1 | cut -d= -f2- | tr -d '[:space:]')}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-ChangeMe!2026}"
 
 # admin 的 userId（owner 判定用）。.env.release 里 BOOTSTRAP_ADMIN_USER_ID 或默认 docker-admin
 ADMIN_UID="$(grep -E '^BOOTSTRAP_ADMIN_USER_ID=' .env.release | tail -1 | cut -d= -f2- | tr -d '[:space:]')"
@@ -48,10 +50,6 @@ WORK="$(mktemp -d)"; PKG="$WORK/skillhub-sync.tar.gz"; PKGDIR="$WORK/pkg"
 COOKIE_JAR="$WORK/cookies.txt"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$PKGDIR"
-
-if [[ "$ADMIN_PASSWORD" == "ChangeMe!2026" ]]; then
-  echo "⚠️  ADMIN_PASSWORD 是默认占位值，若主上改过密码请用 ADMIN_PASSWORD=... 重跑" >&2
-fi
 
 # ===========================================================================
 # 1. 拿到同步包

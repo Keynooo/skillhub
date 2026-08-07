@@ -100,3 +100,4 @@ charts/skillhub/charts/*.tgz
 # Qiniu CLI tool binaries (not tracked, downloaded per environment)
 scripts/qshell*
 scripts/.env.qiniu
+sync-out/
