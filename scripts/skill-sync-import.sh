@@ -34,6 +34,9 @@ BASE="${MASTER_BASE_URL:-http://localhost:9001}"
 ADMIN_USER="${ADMIN_USER:-admin}"
 QINIU_KEY="${QINIU_KEY:-skillhub-sync/latest.tar.gz}"
 
+# 状态文件：记录上次成功导入的同步包 hash，用于跳过无变更的同步
+STATE_FILE="${STATE_FILE:-$HOME/.skillhub-sync/last-import-hash}"
+
 # admin 密码从 .env.release 取，也支持环境变量覆盖
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(grep -E '^BOOTSTRAP_ADMIN_PASSWORD=' .env.release | tail -1 | cut -d= -f2- | tr -d '[:space:]')}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-ChangeMe!2026}"
@@ -50,6 +53,7 @@ WORK="$(mktemp -d)"; PKG="$WORK/skillhub-sync.tar.gz"; PKGDIR="$WORK/pkg"
 COOKIE_JAR="$WORK/cookies.txt"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$PKGDIR"
+mkdir -p "$(dirname "$STATE_FILE")"
 
 # ===========================================================================
 # 1. 拿到同步包
@@ -63,6 +67,17 @@ else
   # 若已配过 qshell account 则可只传 BUCKET，不用重复 AK/SK
   if [[ -n "${QINIU_AK:-}" && -n "${QINIU_SK:-}" ]]; then
     qshell account "$QINIU_AK" "$QINIU_SK" skillhub-sync >/dev/null
+  fi
+  # 先查远程 hash，跟上次导入的一样就跳过（无变更不浪费下载）
+  REMOTE_HASH="$(qshell stat "$QINIU_BUCKET" "$QINIU_KEY" 2>/dev/null | grep -i '^Hash:' | awk '{print $2}' || true)"
+  if [[ -n "${REMOTE_HASH:-}" && -f "$STATE_FILE" ]]; then
+    LAST_HASH="$(cat "$STATE_FILE" 2>/dev/null || true)"
+    if [[ "$REMOTE_HASH" == "$LAST_HASH" ]]; then
+      echo "    ⊘ 跳过（远程 hash 未变: $REMOTE_HASH）"
+      echo ""
+      echo "完成: 无新内容，跳过同步"
+      exit 0
+    fi
   fi
   qshell get "$QINIU_BUCKET" "$QINIU_KEY" --outfile "$PKG"
   echo "    已下载: ${QINIU_BUCKET}/${QINIU_KEY}"
@@ -172,7 +187,7 @@ done < "$PKGDIR/manifest.tsv"
 echo ""
 
 # ===========================================================================
-# 5. 汇总
+# 5. 汇总 + 记录本次 hash
 # ===========================================================================
 echo "==> 5/5 完成"
 echo "    新增(added):        $ADDED"
@@ -181,3 +196,9 @@ echo "    跳过-别人占用同名:   $SKIP_OTHER"
 echo "    跳过-包损坏:         $SKIP_CORRUPT"
 echo "    失败(failed):        $FAILED"
 [[ "$FAILED" -eq 0 ]] || echo "    ⚠️  有失败项，看上面 ✗ 行的响应排查（命名空间/校验/扫描器/版本号冲突等）"
+
+# 记录本次同步包的 hash，供下次跳过判断
+if [[ -n "${REMOTE_HASH:-}" ]]; then
+  echo "$REMOTE_HASH" > "$STATE_FILE"
+  echo "    已记录 hash: $REMOTE_HASH"
+fi
