@@ -66,7 +66,7 @@ else
   if [[ -n "${QINIU_AK:-}" && -n "${QINIU_SK:-}" ]]; then
     qshell account "$QINIU_AK" "$QINIU_SK" skillhub-sync >/dev/null
   fi
-  qshell get "$QINIU_BUCKET" "$QINIU_KEY" "$PKG"
+  qshell get "$QINIU_BUCKET" "$QINIU_KEY" --outfile "$PKG"
   echo "    已下载: ${QINIU_BUCKET}/${QINIU_KEY}"
 fi
 tar xzf "$PKG" -C "$PKGDIR"
