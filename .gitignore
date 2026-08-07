@@ -96,3 +96,7 @@ charts/skillhub/charts/*.tgz
 
 # Local config file
 .mcp.json
+
+# Qiniu CLI tool binaries (not tracked, downloaded per environment)
+scripts/qshell*
+scripts/.env.qiniu
