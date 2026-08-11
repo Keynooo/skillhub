@@ -5,6 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 @Component
@@ -15,6 +16,7 @@ public class SkillPublishProperties {
     private long maxSingleFileSize = 10 * 1024 * 1024;  // 10MB
     private long maxPackageSize = 100 * 1024 * 1024;
     private Set<String> allowedFileExtensions = new LinkedHashSet<>(SkillPackagePolicy.ALLOWED_EXTENSIONS);
+    private List<String> devAllowedHosts = List.of();
 
     public int getMaxFileCount() {
         return maxFileCount;
@@ -46,5 +48,13 @@ public class SkillPublishProperties {
 
     public void setAllowedFileExtensions(Set<String> allowedFileExtensions) {
         this.allowedFileExtensions = new LinkedHashSet<>(allowedFileExtensions);
+    }
+
+    public List<String> getDevAllowedHosts() {
+        return devAllowedHosts;
+    }
+
+    public void setDevAllowedHosts(List<String> devAllowedHosts) {
+        this.devAllowedHosts = devAllowedHosts;
     }
 }

@@ -56,7 +56,7 @@ class BuiltinSkillManifestLoaderTest {
 
         List<BuiltinSkillManifestLoader.ManifestItem> items = loader.load();
 
-        assertThat(items).hasSize(17);
+        assertThat(items).hasSize(18);
         assertThat(items).allSatisfy(item ->
                 assertThat(item.sha256()).matches("[0-9a-f]{64}")
         );

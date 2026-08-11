@@ -33,7 +33,7 @@ for item in runtime_items:
     assert coordinate not in runtime_by_coordinate, coordinate
     runtime_by_coordinate[coordinate] = item
 
-assert len(runtime_items) == 17, len(runtime_items)
+assert len(runtime_items) == 18, len(runtime_items)
 for artifact in artifacts:
     coordinate = (artifact["slug"], artifact["version"])
     assert coordinate in runtime_by_coordinate, coordinate
@@ -55,7 +55,7 @@ from pathlib import Path
 output = Path(sys.argv[1])
 manifest = json.loads((output / "artifacts.json").read_text(encoding="utf-8"))
 artifacts = manifest["artifacts"]
-assert len(artifacts) == 15, len(artifacts)
+assert len(artifacts) == 16, len(artifacts)
 assert [item["slug"] for item in artifacts] == sorted(item["slug"] for item in artifacts)
 
 for item in artifacts:

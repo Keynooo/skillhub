@@ -79,6 +79,7 @@ class BuiltinSkillUpgradeConflictIntegrationTest {
             new SkillCoordinate("diagram-maker", "1.0.0"),
             new SkillCoordinate("documentation-writer", "1.0.0"),
             new SkillCoordinate("exam-ready", "1.0.0"),
+            new SkillCoordinate("forkprobe", "0.8.0"),
             new SkillCoordinate("frontend-design", "1.0.0"),
             new SkillCoordinate("linkedin-post-formatter", "1.0.0"),
             new SkillCoordinate("meeting-note-summarizer", "1.0.0"),
@@ -202,7 +203,7 @@ class BuiltinSkillUpgradeConflictIntegrationTest {
         List<SkillCoordinate> newlyPublished = RELEASE_SKILLS.stream()
                 .filter(item -> !PREEXISTING_SLUGS.contains(item.slug()))
                 .toList();
-        assertThat(newlyPublished).hasSize(14);
+        assertThat(newlyPublished).hasSize(15);
         for (SkillCoordinate item : newlyPublished) {
             List<Skill> skills = skillRepository.findByNamespaceIdAndSlug(global.getId(), item.slug());
             assertThat(skills).singleElement().satisfies(skill -> {
@@ -216,8 +217,8 @@ class BuiltinSkillUpgradeConflictIntegrationTest {
             });
         }
 
-        assertThat(skillRepository.findAll()).hasSize(17);
-        assertThat(skillRepository.findByOwnerId(SYSTEM_PUBLISHER)).hasSize(16);
+        assertThat(skillRepository.findAll()).hasSize(18);
+        assertThat(skillRepository.findByOwnerId(SYSTEM_PUBLISHER)).hasSize(17);
         assertThat(skillVersionRepository.findBySkillId(hello.skillId())).hasSize(1);
         assertThat(skillVersionRepository.findBySkillId(agentguard.skillId())).hasSize(1);
 
@@ -228,10 +229,10 @@ class BuiltinSkillUpgradeConflictIntegrationTest {
                     .orElseThrow();
             verify(downloader, never()).download(URI.create(skipped.url()));
         }
-        verify(downloader, times(14)).download(any(URI.class));
+        verify(downloader, times(15)).download(any(URI.class));
 
         assertThat(output).contains(
-                "Built-in skill synchronization finished: total=17, published=14, "
+                "Built-in skill synchronization finished: total=18, published=15, "
                         + "idempotentSkipped=2, conflictSkipped=1, failed=0"
         );
     }

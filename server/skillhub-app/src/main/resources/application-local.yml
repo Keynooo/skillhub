@@ -28,6 +28,12 @@ spring:
     port: 1025
 
 skillhub:
+  builtin-skills:
+    dev-package-base-url: http://127.0.0.1:8080/api/builtin-skills/packages
+  publish:
+    dev-allowed-hosts:
+      - localhost
+      - 127.0.0.1
   auth:
     mock:
       enabled: true

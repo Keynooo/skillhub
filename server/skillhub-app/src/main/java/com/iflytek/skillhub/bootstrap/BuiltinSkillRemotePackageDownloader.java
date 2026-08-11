@@ -14,6 +14,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
@@ -37,11 +38,15 @@ public class BuiltinSkillRemotePackageDownloader {
     private final long maxPackageSize;
     private final HttpClient httpClient;
     private final Duration requestTimeout;
+    private final List<String> devAllowedHosts;
+    private final String devPackageBaseUrl;
 
     @Autowired
-    public BuiltinSkillRemotePackageDownloader(SkillPublishProperties properties) {
+    public BuiltinSkillRemotePackageDownloader(SkillPublishProperties properties,
+                                               BuiltinSkillProperties builtinSkillProperties) {
         this(
                 properties,
+                builtinSkillProperties,
                 HttpClient.newBuilder()
                         .connectTimeout(CONNECT_TIMEOUT)
                         .followRedirects(HttpClient.Redirect.NEVER)
@@ -50,20 +55,45 @@ public class BuiltinSkillRemotePackageDownloader {
         );
     }
 
-    BuiltinSkillRemotePackageDownloader(SkillPublishProperties properties, HttpClient httpClient) {
-        this(properties, httpClient, REQUEST_TIMEOUT);
+    BuiltinSkillRemotePackageDownloader(SkillPublishProperties properties,
+                                        BuiltinSkillProperties builtinSkillProperties,
+                                        HttpClient httpClient) {
+        this(properties, builtinSkillProperties, httpClient, REQUEST_TIMEOUT);
     }
 
     BuiltinSkillRemotePackageDownloader(
             SkillPublishProperties properties,
+            BuiltinSkillProperties builtinSkillProperties,
             HttpClient httpClient,
             Duration requestTimeout) {
         this.maxPackageSize = properties.getMaxPackageSize();
         this.httpClient = httpClient;
         this.requestTimeout = requestTimeout;
+        this.devAllowedHosts = properties.getDevAllowedHosts();
+        this.devPackageBaseUrl = builtinSkillProperties.getDevPackageBaseUrl();
     }
 
     public Optional<byte[]> download(URI uri) {
+        // First try the primary URL
+        Optional<byte[]> result = downloadInternal(uri);
+        if (result.isPresent()) {
+            return result;
+        }
+
+        // Fallback to dev package base URL if configured
+        if (devPackageBaseUrl != null && !devPackageBaseUrl.isBlank()) {
+            String filename = extractFilename(uri);
+            if (filename != null) {
+                URI fallbackUri = URI.create(devPackageBaseUrl + "/" + filename);
+                log.info("Retrying built-in skill package download from dev fallback: {}", safeUrl(fallbackUri));
+                return downloadInternal(fallbackUri);
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    private Optional<byte[]> downloadInternal(URI uri) {
         if (!isAllowedUrl(uri)) {
             log.warn("Skipping built-in skill package download because URL is not allowed: {}", safeUrl(uri));
             return Optional.empty();
@@ -97,19 +127,24 @@ public class BuiltinSkillRemotePackageDownloader {
         }
     }
 
+    private static String extractFilename(URI uri) {
+        String path = uri.getPath();
+        if (path == null) {
+            return null;
+        }
+        int lastSlash = path.lastIndexOf('/');
+        return lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
+    }
+
     HttpClient httpClient() {
         return httpClient;
     }
 
-    static boolean isAllowedUrl(URI uri) {
-        if (uri == null || !"https".equalsIgnoreCase(uri.getScheme())) {
+    boolean isAllowedUrl(URI uri) {
+        if (uri == null) {
             return false;
         }
         if (uri.getRawUserInfo() != null) {
-            return false;
-        }
-        int port = uri.getPort();
-        if (port != -1 && port != 443) {
             return false;
         }
         String host = uri.getHost();
@@ -117,10 +152,37 @@ public class BuiltinSkillRemotePackageDownloader {
             return false;
         }
         String normalizedHost = host.toLowerCase(Locale.ROOT);
-        if (isDisallowedHostLiteral(normalizedHost)) {
+
+        // In dev/local profiles, allow configured hosts with HTTP (any port)
+        if (isDevAllowedHost(normalizedHost)) {
+            String scheme = uri.getScheme();
+            return "https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme);
+        }
+
+        // Production: strict HTTPS only, default port only
+        if (!"https".equalsIgnoreCase(uri.getScheme())) {
+            return false;
+        }
+        int port = uri.getPort();
+        if (port != -1 && port != 443) {
+            return false;
+        }
+        if (isLocalOrLiteralHost(normalizedHost)) {
             return false;
         }
         return normalizedHost.equals(ALLOWED_HOST) || normalizedHost.endsWith("." + ALLOWED_HOST);
+    }
+
+    private boolean isDevAllowedHost(String normalizedHost) {
+        if (devAllowedHosts == null) {
+            return false;
+        }
+        for (String devHost : devAllowedHosts) {
+            if (normalizedHost.equals(devHost)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Optional<byte[]> readBounded(InputStream inputStream) throws IOException {
@@ -181,7 +243,7 @@ public class BuiltinSkillRemotePackageDownloader {
         }
     }
 
-    private static boolean isDisallowedHostLiteral(String host) {
+    private static boolean isLocalOrLiteralHost(String host) {
         return "localhost".equals(host)
                 || IPV4_LITERAL.matcher(host).matches()
                 || host.contains(":");

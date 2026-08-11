@@ -29,6 +29,7 @@ ALLOWED_EXTENSIONS = {
     ".toml", ".xml", ".xsd", ".xsl", ".dtd", ".ini", ".cfg", ".env",
     ".js", ".cjs", ".mjs", ".ts", ".py", ".sh", ".rb", ".go", ".rs", ".java",
     ".kt", ".lua", ".sql", ".r", ".bat", ".ps1", ".zsh", ".bash",
+    ".j2",
     ".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".ico",
     ".doc", ".xls", ".ppt", ".docx", ".xlsx", ".pptx",
 }

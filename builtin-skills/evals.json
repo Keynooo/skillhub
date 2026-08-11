@@ -80,6 +80,19 @@
       ]
     },
     {
+      "slug": "forkprobe",
+      "prompt": "我想比较几个科研写作 skill，看看哪个更适合润色我的英文摘要。",
+      "acceptance": [
+        "Recommends candidate skills from the catalog or local discovery",
+        "Explains that comparison needs user confirmation before execution",
+        "Mentions that real output comparison requires running skills in parallel"
+      ],
+      "forbidden": [
+        "Automatically executing skills without user confirmation",
+        "Uploading raw task content to external services"
+      ]
+    },
+    {
       "slug": "frontend-design",
       "prompt": "Design a responsive landing page for a neighborhood repair cafe. It should feel practical, friendly, and handmade, with accessible contrast.",
       "acceptance": [

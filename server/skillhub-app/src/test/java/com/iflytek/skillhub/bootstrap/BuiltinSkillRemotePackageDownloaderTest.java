@@ -20,6 +20,7 @@ import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -33,27 +34,47 @@ class BuiltinSkillRemotePackageDownloaderTest {
 
     @Test
     void acceptsAllowedHttpsCdnHostsOnly() {
-        assertThat(BuiltinSkillRemotePackageDownloader.isAllowedUrl(URI.create("https://bjcdn.openstorage.cn/a.zip")))
+        BuiltinSkillRemotePackageDownloader downloader =
+                new BuiltinSkillRemotePackageDownloader(new SkillPublishProperties(), new BuiltinSkillProperties());
+        assertThat(downloader.isAllowedUrl(URI.create("https://bjcdn.openstorage.cn/a.zip")))
                 .isTrue();
-        assertThat(BuiltinSkillRemotePackageDownloader.isAllowedUrl(URI.create("https://assets.bjcdn.openstorage.cn/a.zip")))
+        assertThat(downloader.isAllowedUrl(URI.create("https://assets.bjcdn.openstorage.cn/a.zip")))
                 .isTrue();
-        assertThat(BuiltinSkillRemotePackageDownloader.isAllowedUrl(URI.create("http://bjcdn.openstorage.cn/a.zip")))
+        assertThat(downloader.isAllowedUrl(URI.create("http://bjcdn.openstorage.cn/a.zip")))
                 .isFalse();
-        assertThat(BuiltinSkillRemotePackageDownloader.isAllowedUrl(URI.create("https://evil.com/a.zip")))
+        assertThat(downloader.isAllowedUrl(URI.create("https://evil.com/a.zip")))
                 .isFalse();
-        assertThat(BuiltinSkillRemotePackageDownloader.isAllowedUrl(URI.create("https://user:pass@bjcdn.openstorage.cn/a.zip")))
+        assertThat(downloader.isAllowedUrl(URI.create("https://user:pass@bjcdn.openstorage.cn/a.zip")))
                 .isFalse();
-        assertThat(BuiltinSkillRemotePackageDownloader.isAllowedUrl(URI.create("https://bjcdn.openstorage.cn:8443/a.zip")))
+        assertThat(downloader.isAllowedUrl(URI.create("https://bjcdn.openstorage.cn:8443/a.zip")))
                 .isFalse();
-        assertThat(BuiltinSkillRemotePackageDownloader.isAllowedUrl(URI.create("https://127.0.0.1/a.zip")))
+        assertThat(downloader.isAllowedUrl(URI.create("https://127.0.0.1/a.zip")))
                 .isFalse();
-        assertThat(BuiltinSkillRemotePackageDownloader.isAllowedUrl(URI.create("https://localhost/a.zip")))
+        assertThat(downloader.isAllowedUrl(URI.create("https://localhost/a.zip")))
+                .isFalse();
+    }
+
+    @Test
+    void acceptsDevAllowedHostsWithHttp() {
+        SkillPublishProperties properties = new SkillPublishProperties();
+        properties.setDevAllowedHosts(List.of("localhost", "127.0.0.1"));
+        BuiltinSkillRemotePackageDownloader downloader =
+                new BuiltinSkillRemotePackageDownloader(properties, new BuiltinSkillProperties());
+        assertThat(downloader.isAllowedUrl(URI.create("http://localhost:9000/builtin-skills/pkg.zip")))
+                .isTrue();
+        assertThat(downloader.isAllowedUrl(URI.create("http://127.0.0.1:9000/builtin-skills/pkg.zip")))
+                .isTrue();
+        // Dev hosts allow any port
+        assertThat(downloader.isAllowedUrl(URI.create("http://localhost:9900/builtin-skills/pkg.zip")))
+                .isTrue();
+        // Dev host but with user info still blocked
+        assertThat(downloader.isAllowedUrl(URI.create("http://user:pass@localhost:9000/builtin-skills/pkg.zip")))
                 .isFalse();
     }
 
     @Test
     void defaultHttpClientDoesNotFollowRedirects() {
-        BuiltinSkillRemotePackageDownloader downloader = new BuiltinSkillRemotePackageDownloader(new SkillPublishProperties());
+        BuiltinSkillRemotePackageDownloader downloader = new BuiltinSkillRemotePackageDownloader(new SkillPublishProperties(), new BuiltinSkillProperties());
 
         assertThat(downloader.httpClient().followRedirects()).isEqualTo(HttpClient.Redirect.NEVER);
         assertThat(downloader.httpClient().connectTimeout()).contains(Duration.ofSeconds(5));
@@ -63,7 +84,7 @@ class BuiltinSkillRemotePackageDownloaderTest {
     void downloadsAllowedUrlWithThirtySecondRequestTimeout() {
         FakeHttpClient client = new FakeHttpClient(200, new byte[] {1, 2, 3});
         BuiltinSkillRemotePackageDownloader downloader = new BuiltinSkillRemotePackageDownloader(
-                new SkillPublishProperties(),
+                new SkillPublishProperties(), new BuiltinSkillProperties(),
                 client
         );
 
@@ -77,7 +98,7 @@ class BuiltinSkillRemotePackageDownloaderTest {
     void rejectsRedirectResponsesWithoutReadingLocation() {
         FakeHttpClient client = new FakeHttpClient(302, new byte[] {1});
         BuiltinSkillRemotePackageDownloader downloader = new BuiltinSkillRemotePackageDownloader(
-                new SkillPublishProperties(),
+                new SkillPublishProperties(), new BuiltinSkillProperties(),
                 client
         );
 
@@ -92,7 +113,7 @@ class BuiltinSkillRemotePackageDownloaderTest {
         CloseAwareInputStream body = new CloseAwareInputStream(new byte[] {1});
         FakeHttpClient client = new FakeHttpClient(500, body);
         BuiltinSkillRemotePackageDownloader downloader = new BuiltinSkillRemotePackageDownloader(
-                new SkillPublishProperties(),
+                new SkillPublishProperties(), new BuiltinSkillProperties(),
                 client
         );
 
@@ -106,7 +127,7 @@ class BuiltinSkillRemotePackageDownloaderTest {
     void rejectedUrlDoesNotSendHttpRequest() {
         FakeHttpClient client = new FakeHttpClient(200, new byte[] {1});
         BuiltinSkillRemotePackageDownloader downloader = new BuiltinSkillRemotePackageDownloader(
-                new SkillPublishProperties(),
+                new SkillPublishProperties(), new BuiltinSkillProperties(),
                 client
         );
 
@@ -121,7 +142,7 @@ class BuiltinSkillRemotePackageDownloaderTest {
         SkillPublishProperties properties = new SkillPublishProperties();
         properties.setMaxPackageSize(2);
         FakeHttpClient client = new FakeHttpClient(200, new byte[] {1, 2, 3});
-        BuiltinSkillRemotePackageDownloader downloader = new BuiltinSkillRemotePackageDownloader(properties, client);
+        BuiltinSkillRemotePackageDownloader downloader = new BuiltinSkillRemotePackageDownloader(properties, new BuiltinSkillProperties(), client);
 
         assertThat(downloader.download(URI.create("https://bjcdn.openstorage.cn/package.zip"))).isEmpty();
     }
@@ -131,7 +152,7 @@ class BuiltinSkillRemotePackageDownloaderTest {
         BlockingInputStream body = new BlockingInputStream();
         FakeHttpClient client = new FakeHttpClient(200, body);
         BuiltinSkillRemotePackageDownloader downloader = new BuiltinSkillRemotePackageDownloader(
-                new SkillPublishProperties(),
+                new SkillPublishProperties(), new BuiltinSkillProperties(),
                 client,
                 Duration.ofMillis(50)
         );

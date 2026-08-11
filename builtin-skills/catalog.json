@@ -62,6 +62,16 @@
       }
     },
     {
+      "slug": "forkprobe",
+      "version": "0.8.0",
+      "license": "MIT",
+      "upstream": {
+        "repository": "https://github.com/Jayden-X-L/forkprobe",
+        "commit": "754c9903f8b9561bb9bbdc53403da9218905b723",
+        "path": "/"
+      }
+    },
+    {
       "slug": "frontend-design",
       "version": "1.0.0",
       "license": "Apache-2.0",

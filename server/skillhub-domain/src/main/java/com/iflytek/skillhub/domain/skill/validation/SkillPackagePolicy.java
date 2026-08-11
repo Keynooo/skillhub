@@ -29,6 +29,8 @@ public final class SkillPackagePolicy {
             ".lua", ".sql", ".r", ".bat", ".ps1", ".zsh", ".bash",
             // Images
             ".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".ico",
+            // Jinja2 templates
+            ".j2",
             // Office documents
             ".doc", ".xls", ".ppt", ".docx", ".xlsx", ".pptx"
     );

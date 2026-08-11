@@ -1,0 +1,1646 @@
+"""
+forkprobe skill recommendation helper.
+
+This is a lightweight preflight step. It turns a user's task description into a
+small candidate set for compare.py. By default it combines curated candidates,
+automatically indexed local skills, GitHub discovery, and EverMind Skill Hub
+results using sanitized task signals. It never decides the winner and never
+calls a model.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import sys
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Optional
+
+
+SCRIPT_DIR = Path(__file__).parent
+PROJECT_DIR = SCRIPT_DIR.parent
+CATALOG_DIR = PROJECT_DIR / "catalog"
+NATURE_SKILLS_REPO = "https://github.com/Yuan1z0825/nature-skills"
+COMPANY_RESEARCH_SOURCE = "https://github.com/deanpeters/Product-Manager-Skills#skills/company-research"
+USER_RESEARCH_SOURCE = "https://github.com/cookiy-ai/user-research-skill"
+LITERATURE_REVIEW_SOURCE = "https://github.com/davila7/claude-code-templates#cli-tool/components/skills/scientific/literature-review"
+INVESTMENT_RESEARCH_SOURCE = "https://github.com/CaiJichang212/investment-research"
+
+# Sibling import works when scripts/ is on sys.path (normal compare/recommend usage).
+try:
+    from discover_skills import discover as discover_skill_pipelines
+    from discover_skills import discover_online_skills
+except ImportError:  # pragma: no cover - direct import fallback for unusual launchers
+    discover_skill_pipelines = None
+    discover_online_skills = None
+
+from candidate_providers import (
+    EverMindSkillHubProvider,
+    LocalSkillProvider,
+    ProviderCandidate,
+    build_provider_query,
+)
+
+
+@dataclass
+class RecommendedSkill:
+    id: str
+    name: str
+    author: str
+    kind: str
+    command_arg: str
+    reason_zh: str
+    reason_en: str
+    source: str = ""
+    runnable: bool = True
+    produces: str = "text"
+    pipeline_steps: list[str] = field(default_factory=list)
+    caution_zh: str = ""
+    caution_en: str = ""
+    source_kind: str = "local"
+    score: int = 0
+    stars: int = 0
+    provider: str = "curated"
+    version: str = ""
+    license: str = ""
+    source_quality_score: float | None = None
+    safety_status: str = ""
+    installed: bool = False
+    local_path: str = ""
+    fingerprint: str = ""
+
+
+@dataclass
+class Recommendation:
+    deliverable_type: str
+    compare_mode: str
+    task_signals: list[str]
+    candidates: list[RecommendedSkill]
+    notes_zh: list[str]
+    notes_en: list[str]
+    suggested_command: list[str]
+    mode_explanation_zh: str = ""
+    mode_explanation_en: str = ""
+    discovery_queries: list[str] = field(default_factory=list)
+
+
+CATALOG_COPY = {
+    "baseline": {
+        "name": "Baseline (no skill)",
+        "author": "",
+        "kind": "baseline",
+        "reason_zh": "原始模型输出，作为参照。",
+        "reason_en": "Raw model output, used as the reference.",
+    },
+    "humanizer": {
+        "reason_zh": "适合英文文本的 anti-AI/humanize 对比。",
+        "reason_en": "Useful for English anti-AI or humanized writing comparisons.",
+    },
+    "writing-anti-ai": {
+        "reason_zh": "适合降低机器感，让中英文表达更自然。",
+        "reason_en": "Useful for reducing AI-like phrasing in Chinese or English.",
+    },
+    "humanizer-zh": {
+        "reason_zh": "适合中文文本去 AI 痕迹，偏中文 Humanizer 路线。",
+        "reason_en": "Useful for removing AI-generated traces from Chinese text.",
+    },
+    "stop-slop": {
+        "reason_zh": "适合英文 prose 去 AI 腔、去泛化表达和模板感。",
+        "reason_en": "Useful for removing AI tells, generic slop, and over-template prose in English.",
+    },
+    "avoid-ai-writing": {
+        "reason_zh": "适合先审计 AI 写作模式，再做英文自然化改写。",
+        "reason_en": "Useful for auditing and rewriting English content to avoid AI writing patterns.",
+    },
+    "remove-ai-flavor-writing-skill": {
+        "reason_zh": "适合中文去 AI 味，清理模板句、假互动结尾和过度圆滑表达。",
+        "reason_en": "Useful for Chinese AI-flavor removal, template shells, fake engagement endings, and over-polished copy.",
+    },
+    "academic-humanizer": {
+        "reason_zh": "适合英文论文、基金或学术材料去 AI 痕迹，同时保留 scholarly voice。",
+        "reason_en": "Useful for removing AI-writing tells from papers and grants while preserving scholarly voice.",
+    },
+    "humanizer-academic-medical": {
+        "reason_zh": "适合医学/生物医学英文论文自然化和去 AI 痕迹。",
+        "reason_en": "Useful for naturalizing academic medical papers and removing AI-generated writing traces.",
+    },
+    "patina": {
+        "reason_zh": "适合韩/英/中/日多语言去 AI 写作场景。",
+        "reason_en": "Useful for multilingual anti-AI rewriting across Korean, English, Chinese, and Japanese.",
+    },
+    "humanai": {
+        "reason_zh": "适合用多阶段流程做多语言 humanization 对比。",
+        "reason_en": "Useful for multilingual humanization comparisons with a staged rewrite pipeline.",
+    },
+    "research-paper-writing-skills": {
+        "reason_zh": "适合中文科研表达、论文段落和 SCI 写作语气优化。",
+        "reason_en": "Useful for Chinese academic expression and SCI-style paper prose.",
+    },
+    "paper-writer-skill": {
+        "reason_zh": "适合正式论文语气、IMRAD 结构和审稿回复类任务。",
+        "reason_en": "Useful for formal manuscript tone, IMRAD structure, and reviewer-response tasks.",
+    },
+}
+
+
+BYO_COPY = {
+    "nature-polishing": RecommendedSkill(
+        id="byo:nature-polishing",
+        name="nature-polishing",
+        author="Yuan1z",
+        kind="byo",
+        command_arg=f"{NATURE_SKILLS_REPO}#skills/nature-polishing",
+        reason_zh="适合英文/Nature 风格润色、中译英和英文摘要优化。",
+        reason_en="Useful for Nature-style English polishing, translation, and abstract refinement.",
+    ),
+    "nature-response": RecommendedSkill(
+        id="byo:nature-response",
+        name="nature-response",
+        author="Yuan1z",
+        kind="byo",
+        command_arg=f"{NATURE_SKILLS_REPO}#skills/nature-response",
+        reason_zh="适合返修、审稿人意见回复和 response letter。",
+        reason_en="Useful for revision responses, reviewer comments, and response letters.",
+    ),
+    "nature-figure": RecommendedSkill(
+        id="byo:nature-figure",
+        name="nature-figure",
+        author="Yuan1z",
+        kind="byo",
+        command_arg=f"{NATURE_SKILLS_REPO}#skills/nature-figure",
+        reason_zh="适合 Nature 风格科研图、figure storyline、panel 结构和图注构思。",
+        reason_en="Useful for Nature-style figures, figure storyline, panel structure, and caption planning.",
+        caution_zh="如果最终要科研图成品，请走 figure artifact pipeline；这里仅用于明确只要图注/说明文字的任务。",
+        caution_en="Use the figure artifact pipeline for finished scientific figures; keep this only for caption or planning-only tasks.",
+    ),
+    "nature-paper2ppt": RecommendedSkill(
+        id="byo:nature-paper2ppt",
+        name="nature-paper2ppt",
+        author="Yuan1z",
+        kind="byo",
+        command_arg=f"{NATURE_SKILLS_REPO}#skills/nature-paper2ppt",
+        reason_zh="适合把论文内容转成 Nature 风格汇报结构或 PPT 草案。",
+        reason_en="Useful for turning paper content into a Nature-style presentation outline or draft.",
+        caution_zh="这里用于 PPT 方案/大纲对比；如果要比较 PPTX 成品，请走 artifact 模式。",
+        caution_en="Use this for PPT plan/outline comparison; use artifact mode to compare finished PPTX files.",
+    ),
+}
+
+
+ARTIFACT_PIPELINES = {
+    "baseline-presentations": RecommendedSkill(
+        id="baseline-presentations",
+        name="baseline + presentations",
+        author="",
+        kind="pipeline",
+        command_arg="baseline+presentations",
+        reason_zh="不使用专门规划 skill，直接用主模型和 Presentations 生成 PPTX，作为成品基线。",
+        reason_en="Uses the main model plus Presentations directly as the artifact baseline.",
+        runnable=False,
+        produces="pptx",
+        pipeline_steps=["baseline", "presentations:Presentations"],
+    ),
+    "nature-paper2ppt-presentations": RecommendedSkill(
+        id="nature-paper2ppt-presentations",
+        name="nature-paper2ppt + presentations",
+        author="Yuan1z",
+        kind="pipeline",
+        command_arg=f"{NATURE_SKILLS_REPO}#skills/nature-paper2ppt+presentations",
+        reason_zh="先用 Nature 风格论文转汇报 skill 做结构规划，再用 Presentations 生成 PPTX。",
+        reason_en="Plans the deck with nature-paper2ppt, then generates the PPTX with Presentations.",
+        runnable=False,
+        produces="pptx",
+        pipeline_steps=[f"{NATURE_SKILLS_REPO}#skills/nature-paper2ppt", "presentations:Presentations"],
+    ),
+    "pptx-direct": RecommendedSkill(
+        id="pptx-direct",
+        name="pptx",
+        author="",
+        kind="pipeline",
+        command_arg="pptx",
+        reason_zh="直接使用 PowerPoint 文件结构和版式控制，适合比较可编辑 PPTX 成品质量。",
+        reason_en="Directly controls PowerPoint file structure and layout for editable PPTX quality.",
+        runnable=False,
+        produces="pptx",
+        pipeline_steps=["pptx"],
+    ),
+    "storyboard-presentations": RecommendedSkill(
+        id="storyboard-presentations",
+        name="storyboard + presentations",
+        author="",
+        kind="pipeline",
+        command_arg="storyboard+presentations",
+        reason_zh="先梳理叙事流、页面节奏和视觉表达，再用 Presentations 生成 PPTX。",
+        reason_en="Builds narrative flow and slide rhythm first, then generates the PPTX with Presentations.",
+        runnable=False,
+        produces="pptx",
+        pipeline_steps=["storyboard", "presentations:Presentations"],
+    ),
+}
+
+
+FIGURE_ARTIFACT_PIPELINES = {
+    "baseline-python-figure": RecommendedSkill(
+        id="baseline-python-figure",
+        name="baseline + Python figure package",
+        author="",
+        kind="pipeline",
+        command_arg="baseline-python-figure",
+        reason_zh="不使用专门科研作图 skill，直接生成可复现的 Python/SVG 图包，作为成品基线。",
+        reason_en="No specialized figure skill; produces a reproducible Python/SVG figure package as the baseline.",
+        runnable=False,
+        produces="figure_package",
+        pipeline_steps=["baseline", "python/matplotlib-or-svg", "artifact-qa"],
+        score=82,
+    ),
+    "nature-figure-python": RecommendedSkill(
+        id="nature-figure-python",
+        name="nature-figure + Python/SVG renderer",
+        author="Yuan1z",
+        kind="pipeline",
+        command_arg=f"{NATURE_SKILLS_REPO}#skills/nature-figure+python-svg-renderer",
+        reason_zh="先用 nature-figure 做科学设计、storyline、panel 结构和图注，再生成投稿级图包。",
+        reason_en="Uses nature-figure for scientific design, storyline, panel structure, and caption before rendering a submission-oriented package.",
+        runnable=False,
+        produces="figure_package",
+        pipeline_steps=[f"{NATURE_SKILLS_REPO}#skills/nature-figure", "python/svg-renderer", "artifact-qa"],
+        caution_zh="这是科研图成品 pipeline，执行时应输出 PNG 预览、SVG/PDF/TIFF、源代码或矢量源文件、caption 和 QA。",
+        caution_en="This is a scientific figure artifact pipeline; execution should output PNG preview, SVG/PDF/TIFF, source code or vector source, caption, and QA notes.",
+        source_kind="known_github",
+        score=88,
+    ),
+    "plot-code-python": RecommendedSkill(
+        id="plot-code-python",
+        name="data plot code pipeline",
+        author="",
+        kind="pipeline",
+        command_arg="plot-code-python",
+        reason_zh="面向真实数据作图：读取数据、生成绘图代码、导出 PNG/SVG/PDF/TIFF 和简短图注。",
+        reason_en="For real data plots: load data, generate plotting code, export PNG/SVG/PDF/TIFF, and write a short caption.",
+        runnable=False,
+        produces="figure_package",
+        pipeline_steps=["data-understanding", "python/matplotlib-or-seaborn", "export", "artifact-qa"],
+        score=85,
+    ),
+    "schematic-svg": RecommendedSkill(
+        id="schematic-svg",
+        name="schematic SVG / draw.io pipeline",
+        author="",
+        kind="pipeline",
+        command_arg="schematic-svg",
+        reason_zh="面向机制图、架构图和流程图：先设计布局，再生成 SVG/draw.io 友好的矢量图包。",
+        reason_en="For mechanism, architecture, and workflow diagrams: design layout first, then produce an SVG/draw.io-friendly vector package.",
+        runnable=False,
+        produces="figure_package",
+        pipeline_steps=["brief-to-layout", "svg-or-drawio", "export", "artifact-qa"],
+        score=84,
+    ),
+    "graphical-abstract-svg": RecommendedSkill(
+        id="graphical-abstract-svg",
+        name="graphical abstract SVG pipeline",
+        author="",
+        kind="pipeline",
+        command_arg="graphical-abstract-svg",
+        reason_zh="面向 graphical abstract：把论文 brief 转成单幅摘要图、导出预览和矢量源文件。",
+        reason_en="For graphical abstracts: turn a paper brief into a single visual abstract with preview and vector source files.",
+        runnable=False,
+        produces="figure_package",
+        pipeline_steps=["paper-brief", "visual-storyboard", "svg-render", "artifact-qa"],
+        score=80,
+    ),
+}
+
+
+RESEARCH_ARTIFACT_PIPELINES = {
+    "baseline-research-report": RecommendedSkill(
+        id="baseline-research-report",
+        name="baseline + research report package",
+        author="",
+        kind="pipeline",
+        command_arg="baseline-research-report",
+        reason_zh="不使用专门调研 skill，直接生成完整调研报告包，作为成品基线。",
+        reason_en="No specialized research skill; produces a complete research report package as the baseline.",
+        runnable=False,
+        produces="research_report",
+        pipeline_steps=["baseline", "research-report", "source-and-claim-qa"],
+        score=82,
+    ),
+    "source-first-research": RecommendedSkill(
+        id="source-first-research",
+        name="source-first research report",
+        author="",
+        kind="pipeline",
+        command_arg="source-first-research",
+        reason_zh="先收集和筛选来源，再从证据表生成调研报告，强调引用可靠性和可追溯结论。",
+        reason_en="Collects and screens sources first, then builds the report from an evidence table with traceable claims.",
+        runnable=False,
+        produces="research_report",
+        pipeline_steps=["source-discovery", "evidence-table", "report-synthesis", "claim-qa"],
+        score=86,
+    ),
+    "analyst-style-report": RecommendedSkill(
+        id="analyst-style-report",
+        name="analyst-style research report",
+        author="",
+        kind="pipeline",
+        command_arg="analyst-style-report",
+        reason_zh="咨询/投研风格报告：强调 executive summary、结构化洞察、判断、风险和下一步建议。",
+        reason_en="Consulting/analyst-style report focused on executive summary, structured insights, judgement, risks, and next steps.",
+        runnable=False,
+        produces="research_report",
+        pipeline_steps=["research-scope", "analyst-framework", "insight-synthesis", "recommendations"],
+        score=84,
+    ),
+    "evidence-table-report": RecommendedSkill(
+        id="evidence-table-report",
+        name="evidence-table research report",
+        author="",
+        kind="pipeline",
+        command_arg="evidence-table-report",
+        reason_zh="先建立 claim-evidence 表，再生成报告，适合严肃调研和需要审计证据链的任务。",
+        reason_en="Builds a claim-evidence table before the report, suitable for rigorous research and auditable evidence chains.",
+        runnable=False,
+        produces="research_report",
+        pipeline_steps=["claim-map", "evidence-table", "claim-checks", "report-synthesis"],
+        score=85,
+    ),
+    "company-research-report": RecommendedSkill(
+        id="company-research-report",
+        name="company-research + report package",
+        author="deanpeters",
+        kind="pipeline",
+        command_arg=COMPANY_RESEARCH_SOURCE,
+        reason_zh="使用真实 company-research skill 做公司、竞品、产品策略和组织背景调研，再输出可比较报告包。",
+        reason_en="Uses a real company-research skill for company, competitor, product strategy, and org-context research.",
+        source=COMPANY_RESEARCH_SOURCE,
+        runnable=False,
+        produces="research_report",
+        pipeline_steps=[COMPANY_RESEARCH_SOURCE, "report-package", "source-and-claim-qa"],
+        source_kind="known_github",
+        score=88,
+    ),
+    "user-research-cookiy-report": RecommendedSkill(
+        id="user-research-cookiy-report",
+        name="user-research-cookiy + report package",
+        author="cookiy-ai",
+        kind="pipeline",
+        command_arg=USER_RESEARCH_SOURCE,
+        reason_zh="使用真实 user-research-cookiy skill 做用户研究计划、访谈/问卷设计或访谈资料综合报告。",
+        reason_en="Uses the real user-research-cookiy skill for study plans, interview/survey design, or transcript synthesis reports.",
+        source=USER_RESEARCH_SOURCE,
+        runnable=False,
+        produces="research_report",
+        pipeline_steps=[USER_RESEARCH_SOURCE, "research-synthesis-package", "source-and-claim-qa"],
+        source_kind="known_github",
+        score=88,
+    ),
+    "literature-review-report": RecommendedSkill(
+        id="literature-review-report",
+        name="literature-review + report package",
+        author="davila7",
+        kind="pipeline",
+        command_arg=LITERATURE_REVIEW_SOURCE,
+        reason_zh="使用真实 literature-review skill 做学术/技术文献调研，输出结构化综述报告和证据表。",
+        reason_en="Uses a real literature-review skill for academic or technical literature reviews with an evidence table.",
+        source=LITERATURE_REVIEW_SOURCE,
+        runnable=False,
+        produces="research_report",
+        pipeline_steps=[LITERATURE_REVIEW_SOURCE, "literature-synthesis-package", "source-and-claim-qa"],
+        source_kind="known_github",
+        score=87,
+    ),
+    "investment-research-report": RecommendedSkill(
+        id="investment-research-report",
+        name="investment-research + report package",
+        author="CaiJichang212",
+        kind="pipeline",
+        command_arg=INVESTMENT_RESEARCH_SOURCE,
+        reason_zh="使用真实 investment-research skill 做投研/行业机会分析，并明确风险、假设和非投资建议边界。",
+        reason_en="Uses a real investment-research skill for investment or sector opportunity research with risk and assumption boundaries.",
+        source=INVESTMENT_RESEARCH_SOURCE,
+        runnable=False,
+        produces="research_report",
+        pipeline_steps=[INVESTMENT_RESEARCH_SOURCE, "investment-report-package", "risk-qa"],
+        source_kind="known_github",
+        score=86,
+    ),
+}
+
+
+def _pipeline_from_discovery(pipeline) -> RecommendedSkill:
+    """Convert discover_skills.PipelineCandidate into recommend.py's UI model."""
+    return RecommendedSkill(
+        id=pipeline.id,
+        name=pipeline.name,
+        author="",
+        kind="pipeline",
+        command_arg=pipeline.id,
+        reason_zh=pipeline.summary_zh,
+        reason_en=pipeline.summary_en,
+        source=pipeline.source,
+        runnable=False,
+        produces="pptx",
+        pipeline_steps=list(pipeline.components),
+        caution_zh=(
+            f"状态: {pipeline.executable_status}。{pipeline.risk_zh}"
+            if pipeline.risk_zh else f"状态: {pipeline.executable_status}。"
+        ),
+        caution_en=(
+            f"Status: {pipeline.executable_status}. {pipeline.risk_en}"
+            if pipeline.risk_en else f"Status: {pipeline.executable_status}."
+        ),
+        source_kind="local_or_curated_external",
+        score=80 if pipeline.executable_status == "ready_or_local" else 70,
+    )
+
+
+def _skill_from_online_discovery(candidate, deliverable_type: str) -> RecommendedSkill:
+    if deliverable_type == "pptx":
+        produces = "pptx"
+    elif deliverable_type == "visual_artifact":
+        produces = "figure_package"
+    elif deliverable_type == "research_report":
+        produces = "research_report"
+    elif deliverable_type == "web_artifact":
+        produces = "web_site"
+    elif deliverable_type == "video_artifact":
+        produces = "video_package"
+    else:
+        produces = "text"
+    return RecommendedSkill(
+        id=candidate.id,
+        name=candidate.name,
+        author="GitHub",
+        kind="github_discovered",
+        command_arg=candidate.command_arg,
+        reason_zh=candidate.summary_zh,
+        reason_en=candidate.summary_en,
+        source=candidate.source,
+        runnable=bool(candidate.runnable and deliverable_type not in {"pptx", "visual_artifact", "research_report", "web_artifact", "video_artifact"}),
+        produces=produces,
+        pipeline_steps=[candidate.command_arg] if deliverable_type in {"pptx", "visual_artifact", "research_report", "web_artifact", "video_artifact"} else [],
+        caution_zh=candidate.risk_zh,
+        caution_en=candidate.risk_en,
+        source_kind=candidate.category or "github_discovered",
+        score=int(candidate.score),
+        stars=int(candidate.stars),
+        provider="github_discovery",
+    )
+
+
+def _skill_from_provider(candidate: ProviderCandidate, deliverable_type: str) -> RecommendedSkill:
+    produces_by_deliverable = {
+        "pptx": "pptx",
+        "visual_artifact": "figure_package",
+        "research_report": "research_report",
+        "web_artifact": "web_site",
+        "video_artifact": "video_package",
+    }
+    produces = produces_by_deliverable.get(deliverable_type, "text")
+    if candidate.provider == "local_installed":
+        reason_zh = f"本地已安装的 Skill，与当前 {deliverable_type} 场景匹配，可直接进入确认和试跑。"
+        reason_en = f"Locally installed Skill matched to the current {deliverable_type} scene and ready for confirmation and trial-run."
+        author = "Local"
+    else:
+        reason_zh = f"EverMind Skill Hub 发现候选：{candidate.description}"
+        reason_en = f"EverMind Skill Hub candidate: {candidate.description}"
+        author = "EverMind Skill Hub"
+    caution_parts_zh: list[str] = []
+    caution_parts_en: list[str] = []
+    if candidate.license:
+        caution_parts_zh.append(f"许可证: {candidate.license}")
+        caution_parts_en.append(f"License: {candidate.license}")
+    else:
+        caution_parts_zh.append("许可证待确认")
+        caution_parts_en.append("License needs verification")
+    if candidate.provider == "evermind":
+        caution_parts_zh.append("执行前仍需检查仓库、依赖和脚本")
+        caution_parts_en.append("Repository, dependencies, and scripts still need preflight checks")
+    return RecommendedSkill(
+        id=candidate.id,
+        name=candidate.name,
+        author=author,
+        kind=candidate.provider,
+        command_arg=candidate.command_arg,
+        reason_zh=reason_zh,
+        reason_en=reason_en,
+        source=candidate.source,
+        runnable=candidate.runnable,
+        produces=produces,
+        pipeline_steps=[candidate.command_arg] if produces != "text" else [],
+        caution_zh="；".join(caution_parts_zh),
+        caution_en="; ".join(caution_parts_en),
+        source_kind=candidate.provider,
+        score=int(candidate.score),
+        stars=int(candidate.stars),
+        provider=candidate.provider,
+        version=candidate.version,
+        license=candidate.license,
+        source_quality_score=candidate.source_quality_score,
+        safety_status=candidate.safety_status,
+        installed=candidate.installed,
+        local_path=candidate.local_path,
+        fingerprint=candidate.fingerprint,
+    )
+
+
+KEYWORDS = {
+    "anti_ai": [
+        "ai味", "ai 味", "机器感", "模板感", "不自然", "更自然", "降低ai", "降低 ai",
+        "anti-ai", "ai-like", "humanize", "humanizer", "less ai",
+    ],
+    "english": [
+        "英文", "英语", "中译英", "英译", "abstract", "english", "translate", "translation",
+        "polish", "nature", "science", "cell",
+    ],
+    "nature": ["nature", "自然子刊", "nature 风格", "nature风格"],
+    "chinese_academic": [
+        "科研", "论文", "sci", "学术", "摘要", "方法", "结果", "讨论", "医学",
+        "临床", "投稿", "润色",
+    ],
+    "rebuttal": [
+        "rebuttal", "response letter", "reviewer", "revision", "审稿", "审稿人", "返修",
+        "回复审稿", "大修", "小修",
+    ],
+    "figure": [
+        "figure", "fig.", "图", "示意图", "画图", "作图", "绘图", "流程图", "图表",
+        "机制图", "架构图", "graphical abstract", "schematic", "diagram",
+        "plot", "graph", "visualization", "可视化",
+    ],
+    "slides": ["ppt", "slide", "slides", "汇报", "presentation", "deck", "答辩"],
+    "research_report": [
+        "调研", "调研报告", "研究报告", "行业调研", "市场调研", "用户调研", "用户研究",
+        "公司调研", "公司研究", "竞品分析", "竞对分析", "投研报告", "深度调研",
+        "research report", "market research", "industry research", "company research",
+        "competitive analysis", "user research", "customer research", "literature review",
+        "investment research", "analyst report",
+    ],
+    "web": [
+        "网页", "网站", "落地页", "着陆页", "官网", "页面", "前端", "web page",
+        "webpage", "website", "landing page", "frontend", "dashboard", "web app",
+        "html page", "interactive prototype", "交互原型", "数据看板",
+    ],
+    "video": [
+        "视频", "宣传片", "产品片", "产品视频", "动效", "动态图形", "口播", "粗剪",
+        "剪辑", "短片", "短视频", "video", "promo", "product launch video",
+        "motion graphics", "talking head", "rough cut",
+    ],
+}
+
+
+TEXT_ONLY_HINTS = [
+    "不要生成pptx", "不要生成 pptx", "不生成pptx", "不生成 pptx", "不要生成文件",
+    "只要方案", "只给方案", "先给方案", "ppt方案", "ppt 方案", "ppt大纲", "ppt 大纲",
+    "推荐页数", "每页标题", "核心要点", "讲述逻辑", "建议图表", "输出格式",
+]
+
+PPT_ARTIFACT_HINTS = [
+    "做一个ppt", "做ppt", "做成ppt", "生成ppt", "正式ppt", "pptx", "powerpoint",
+    "slide deck", "deck", "生成 slide", "生成slide",
+]
+
+FIGURE_TEXT_ONLY_HINTS = [
+    "只要图注", "只给图注", "只要caption", "只给caption", "只要说明", "只给说明",
+    "只要storyline", "只给storyline", "只看storyline", "不要生成图片", "不生成图片",
+    "不要生成图", "不生成图", "不要生成文件", "只要代码草案", "只给代码草案",
+]
+
+FIGURE_ARTIFACT_HINTS = [
+    "成品", "投稿", "最终图", "最终figure", "生成图片", "生成图", "生成示意图",
+    "画图", "作图", "绘图", "png", "svg", "pdf", "tiff", "draw.io", "drawio",
+    "源文件", "矢量", "可编辑", "figure package", "artifact",
+]
+
+RESEARCH_REPORT_HINTS = [
+    "调研报告", "研究报告", "行业调研", "市场调研", "用户调研", "用户研究", "公司调研",
+    "公司研究", "竞品分析", "竞对分析", "投研报告", "深度调研", "research report",
+    "market research", "industry research", "company research", "competitive analysis",
+    "user research", "customer research", "literature review", "investment research",
+    "analyst report",
+]
+
+WEB_ARTIFACT_HINTS = [
+    "做一个网页", "制作网页", "生成网页", "开发网页", "搭建网页", "做一个网站", "制作网站",
+    "生成网站", "开发网站", "搭建网站", "网页成品", "html成品", "html 成品", "落地页",
+    "着陆页", "官网", "数据看板", "交互原型", "webpage", "web page", "website",
+    "landing page", "frontend page", "web app", "html page", "build a page", "build a website",
+    "create a page", "create a website", "create an html", "interactive prototype",
+]
+
+WEB_TEXT_ONLY_HINTS = [
+    "只要网页方案", "只给网页方案", "只要页面方案", "只给页面方案", "只要线框", "只给线框",
+    "只要wireframe", "只给wireframe", "只要 prompt", "只给 prompt", "不要生成网页", "不生成网页",
+    "不要写代码", "不写代码", "不要生成文件", "website brief only", "wireframe only", "prompt only",
+]
+
+VIDEO_ARTIFACT_HINTS = [
+    "视频", "宣传片", "产品片", "产品视频", "动效", "动态图形", "口播", "粗剪", "剪辑",
+    "成片", "mp4", "webm", "video", "promo", "product launch video", "motion graphics",
+    "talking head", "rough cut",
+]
+
+VIDEO_TEXT_ONLY_HINTS = [
+    "只要脚本", "只给脚本", "只要文案", "只给文案", "只要分镜", "只给分镜",
+    "不要生成视频", "不生成视频", "不要渲染", "不渲染", "script only",
+    "storyboard only", "video brief only", "只要视频方案", "只给视频方案",
+]
+
+LOCAL_ONLY_HINTS = [
+    "只要本地", "仅本地", "只用本地", "本地候选", "不要联网", "别联网",
+    "不联网", "离线", "local only", "offline", "no network",
+]
+
+
+def load_catalog(domain: str = "academic-writing") -> dict:
+    catalog_path = CATALOG_DIR / f"{domain}.json"
+    if not catalog_path.exists():
+        raise FileNotFoundError(f"Catalog not found: {catalog_path}")
+    return json.loads(catalog_path.read_text(encoding="utf-8"))
+
+
+def _has_any(text: str, words: list[str]) -> bool:
+    lower = text.lower()
+    return any(word.lower() in lower for word in words)
+
+
+def _compact(text: str) -> str:
+    return "".join(text.lower().split())
+
+
+def _has_compact_any(text: str, phrases: list[str]) -> bool:
+    compact = _compact(text)
+    return any(_compact(phrase) in compact for phrase in phrases)
+
+
+def detect_task_signals(task_text: str) -> list[str]:
+    signals = [name for name, words in KEYWORDS.items() if _has_any(task_text, words)]
+    cjk_chars = sum(1 for ch in task_text if "\u4e00" <= ch <= "\u9fff")
+    if cjk_chars >= 8 and "zh" not in signals:
+        signals.append("zh")
+    if not signals:
+        signals.append("general")
+    return signals
+
+
+def detect_deliverable_type(task_text: str, signals: Optional[list[str]] = None) -> str:
+    """Classify the requested output so artifact tasks do not get routed as text-only comparisons."""
+    signals = signals or detect_task_signals(task_text)
+    signal_set = set(signals)
+    if "research_report" in signal_set and _has_compact_any(task_text, RESEARCH_REPORT_HINTS):
+        return "research_report"
+    if "video" in signal_set and _has_compact_any(task_text, VIDEO_ARTIFACT_HINTS):
+        if _has_compact_any(task_text, VIDEO_TEXT_ONLY_HINTS):
+            return "text"
+        return "video_artifact"
+    if "slides" in signal_set:
+        if _has_compact_any(task_text, TEXT_ONLY_HINTS):
+            return "ppt_outline"
+        if _has_compact_any(task_text, PPT_ARTIFACT_HINTS):
+            return "pptx"
+        # In natural Chinese, "做一个 PPT" usually means a PPT file, not just an outline.
+        if "ppt" in task_text.lower():
+            return "pptx"
+        return "ppt_outline"
+    if "figure" in signal_set:
+        if _has_compact_any(task_text, FIGURE_TEXT_ONLY_HINTS):
+            return "text"
+        return "visual_artifact"
+    if "web" in signal_set and _has_compact_any(task_text, WEB_ARTIFACT_HINTS):
+        if _has_compact_any(task_text, WEB_TEXT_ONLY_HINTS):
+            return "text"
+        return "web_artifact"
+    return "text"
+
+
+def wants_local_only(task_text: str) -> bool:
+    return _has_compact_any(task_text, LOCAL_ONLY_HINTS)
+
+
+def text_task_type(deliverable_type: str, signals: list[str]) -> str:
+    """Return a stable, privacy-safe category for community selection stats."""
+    signal_set = set(signals)
+    if "rebuttal" in signal_set:
+        return "reviewer_response"
+    if "anti_ai" in signal_set:
+        return "anti_ai_writing"
+    if "figure" in signal_set:
+        return "figure_caption"
+    if deliverable_type == "ppt_outline" or "slides" in signal_set:
+        return "ppt_outline"
+    if signal_set.intersection({"chinese_academic", "english", "nature"}):
+        return "academic_polishing"
+    return "text_general"
+
+
+def _catalog_skill(skill_id: str, catalog: dict, reason_override: Optional[str] = None) -> RecommendedSkill:
+    if skill_id == "baseline":
+        meta = CATALOG_COPY["baseline"]
+        return RecommendedSkill(
+            id="baseline",
+            name=meta["name"],
+            author=meta["author"],
+            kind=meta["kind"],
+            command_arg="baseline",
+            reason_zh=meta["reason_zh"],
+            reason_en=meta["reason_en"],
+            source="local",
+            source_kind="local_baseline",
+            score=10_000,
+        )
+
+    skill_meta = next((s for s in catalog.get("skills", []) if s["id"] == skill_id), None)
+    if not skill_meta:
+        raise KeyError(f"Skill {skill_id!r} not found in catalog")
+    copy = CATALOG_COPY.get(skill_id, {})
+    reason_zh = reason_override or copy.get("reason_zh") or skill_meta.get("notes", "")
+    source = skill_meta.get("source", "")
+    if source and skill_meta.get("subdir"):
+        source = f"{source}#{skill_meta['subdir']}"
+    return RecommendedSkill(
+        id=skill_id,
+        name=skill_meta["name"],
+        author=skill_meta.get("author", ""),
+        kind="catalog",
+        command_arg=skill_id,
+        reason_zh=reason_zh,
+        reason_en=copy.get("reason_en") or skill_meta.get("approach", ""),
+        source=source,
+        source_kind="local_curated",
+        score=85,
+        stars=int(skill_meta.get("approx_stars") or 0) if str(skill_meta.get("approx_stars") or "").isdigit() else 0,
+    )
+
+
+def _append_unique(candidates: list[RecommendedSkill], candidate: RecommendedSkill, max_candidates: int) -> None:
+    if len(candidates) >= max_candidates:
+        return
+    if any(existing.command_arg == candidate.command_arg or existing.id == candidate.id for existing in candidates):
+        return
+    candidates.append(candidate)
+
+
+def _artifact_pipeline(pipeline_id: str) -> RecommendedSkill:
+    return ARTIFACT_PIPELINES[pipeline_id]
+
+
+def _figure_artifact_pipeline(pipeline_id: str) -> RecommendedSkill:
+    return FIGURE_ARTIFACT_PIPELINES[pipeline_id]
+
+
+def _research_artifact_pipeline(pipeline_id: str) -> RecommendedSkill:
+    return RESEARCH_ARTIFACT_PIPELINES[pipeline_id]
+
+
+def _web_artifact_pipeline(pipeline_id: str, catalog: dict) -> RecommendedSkill:
+    skill_meta = next((skill for skill in catalog.get("skills", []) if skill.get("id") == pipeline_id), None)
+    if not skill_meta:
+        raise KeyError(f"Web artifact pipeline {pipeline_id!r} not found in catalog")
+    source = skill_meta.get("source", "")
+    if source and skill_meta.get("subdir"):
+        source = f"{source}#{skill_meta['subdir']}"
+    return RecommendedSkill(
+        id=pipeline_id,
+        name=skill_meta["name"],
+        author=skill_meta.get("author", ""),
+        kind="pipeline",
+        command_arg=pipeline_id,
+        reason_zh=skill_meta.get("summary_zh", ""),
+        reason_en=skill_meta.get("summary_en", ""),
+        source=source,
+        runnable=False,
+        produces="web_site",
+        pipeline_steps=list(skill_meta.get("pipeline_steps", [])),
+        caution_zh=(
+            "需要: " + "、".join(skill_meta.get("requires", []))
+            if skill_meta.get("requires") else ""
+        ),
+        caution_en=(
+            "Requires: " + ", ".join(skill_meta.get("requires", []))
+            if skill_meta.get("requires") else ""
+        ),
+        source_kind="local_baseline" if pipeline_id == "baseline-web" else "known_github",
+        score=10_000 if pipeline_id == "baseline-web" else int(skill_meta.get("score") or 86),
+        stars=int(skill_meta.get("stars") or 0),
+    )
+
+
+def _video_artifact_pipeline(pipeline_id: str, catalog: dict) -> RecommendedSkill:
+    pipeline_meta = next(
+        (pipeline for pipeline in catalog.get("pipelines", []) if pipeline.get("id") == pipeline_id),
+        None,
+    )
+    if not pipeline_meta:
+        raise KeyError(f"Video artifact pipeline {pipeline_id!r} not found in catalog")
+    source = pipeline_meta.get("source", "")
+    if source and pipeline_meta.get("subdir"):
+        source = f"{source}#{pipeline_meta['subdir']}"
+    maturity = str(pipeline_meta.get("maturity") or "stable")
+    requires = [str(value) for value in pipeline_meta.get("requires", [])]
+    caution_zh = f"成熟度: {maturity}。"
+    caution_en = f"Maturity: {maturity}."
+    if requires:
+        caution_zh += " 需要: " + "、".join(requires)
+        caution_en += " Requires: " + ", ".join(requires)
+    return RecommendedSkill(
+        id=pipeline_id,
+        name=pipeline_meta["name"],
+        author=pipeline_meta.get("author", ""),
+        kind="pipeline",
+        command_arg=pipeline_id,
+        reason_zh=pipeline_meta.get("summary_zh", ""),
+        reason_en=pipeline_meta.get("summary_en", ""),
+        source=source,
+        runnable=False,
+        produces="video_package",
+        pipeline_steps=list(pipeline_meta.get("pipeline_steps", [])),
+        caution_zh=caution_zh,
+        caution_en=caution_en,
+        source_kind="known_github",
+        score=86 if maturity == "stable" else 72,
+    )
+
+
+def _candidate_key(candidate: RecommendedSkill) -> str:
+    raw = (candidate.command_arg if "#" in (candidate.command_arg or "") else candidate.source) or candidate.command_arg or candidate.id
+    source = raw.lower().strip()
+    if source.startswith("http") and "#" not in source:
+        source = source.rstrip("/")
+    return source
+
+
+def _is_external_candidate(candidate: RecommendedSkill) -> bool:
+    return (
+        candidate.source_kind.startswith("github")
+        or candidate.source_kind in {"known_github", "evermind"}
+    )
+
+
+def _source_label(candidate: RecommendedSkill, lang: str) -> str:
+    labels = {
+        "local_installed": ("Locally installed", "本地已安装"),
+        "evermind": ("EverMind Skill Hub", "EverMind Skill Hub"),
+        "known_github": ("Known GitHub", "已知 GitHub"),
+        "github_seed": ("GitHub seed", "GitHub seed"),
+        "github_discovered": ("GitHub discovery", "GitHub discovery"),
+        "local_curated": ("ForkProbe curated", "ForkProbe 精选"),
+        "local_baseline": ("Local baseline", "本地 baseline"),
+    }
+    english, chinese = labels.get(candidate.source_kind, (candidate.source_kind, candidate.source_kind))
+    return english if lang == "en" else chinese
+
+
+def _source_quality_text(candidate: RecommendedSkill, lang: str) -> str:
+    if candidate.source_quality_score is None:
+        return ""
+    score = candidate.source_quality_score * 100
+    if candidate.provider == "evermind":
+        label = "Skill Hub quality" if lang == "en" else "Skill Hub 质量分"
+    else:
+        label = "source quality" if lang == "en" else "来源质量分"
+    return f" · {label} {score:.0f}/100"
+
+
+def _rank_and_limit(candidates: list[RecommendedSkill], max_candidates: int) -> list[RecommendedSkill]:
+    deduped: list[RecommendedSkill] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = _candidate_key(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+
+    baseline = [
+        candidate for candidate in deduped
+        if candidate.id == "baseline" or candidate.id.startswith("baseline") or candidate.kind == "baseline"
+    ]
+    others = [candidate for candidate in deduped if candidate not in baseline]
+    others.sort(key=lambda candidate: (candidate.score, candidate.stars), reverse=True)
+
+    selected = (baseline[:1] + others)[:max_candidates]
+
+    # With a normal 4-5 candidate shortlist, preserve source diversity so an
+    # installed local match and a Skill Hub match are not silently crowded out
+    # by several near-identical curated entries.
+    if max_candidates >= 4:
+        protected_kinds: set[str] = set()
+        for source_kind in ("local_installed", "evermind"):
+            source_candidates = [candidate for candidate in others if candidate.source_kind == source_kind]
+            if not source_candidates or any(candidate.source_kind == source_kind for candidate in selected):
+                if source_candidates:
+                    protected_kinds.add(source_kind)
+                continue
+            replacement_index = next(
+                (
+                    index for index in range(len(selected) - 1, 0, -1)
+                    if selected[index].source_kind not in protected_kinds
+                    and selected[index].source_kind not in {"local_installed", "evermind"}
+                ),
+                None,
+            )
+            if replacement_index is not None:
+                selected[replacement_index] = source_candidates[0]
+                protected_kinds.add(source_kind)
+
+    online = [candidate for candidate in others if _is_external_candidate(candidate)]
+    has_online = any(_is_external_candidate(candidate) for candidate in selected)
+    if online and not has_online and len(selected) >= max_candidates and max_candidates > 1:
+        selected[-1] = online[0]
+    elif online and not has_online:
+        selected.append(online[0])
+    return selected[:max_candidates]
+
+
+def _detect_figure_family(task_text: str) -> str:
+    compact = _compact(task_text)
+    if any(word in compact for word in ["graphicalabstract", "图文摘要", "视觉摘要"]):
+        return "graphical_abstract"
+    if any(word in compact for word in ["csv", "excel", "数据", "data", "plot", "曲线", "柱状图", "散点", "箱线", "热图"]):
+        return "plot"
+    if any(word in compact for word in ["机制图", "架构图", "示意图", "流程图", "schematic", "diagram", "architecture", "workflow"]):
+        return "schematic"
+    return "mixed"
+
+
+def _detect_research_family(task_text: str) -> str:
+    compact = _compact(task_text)
+    if any(word in compact for word in ["用户研究", "用户调研", "访谈", "问卷", "userresearch", "customerresearch", "interview", "survey", "persona"]):
+        return "user"
+    if any(word in compact for word in ["文献", "综述", "literaturereview", "paperreview", "academicreview", "技术调研"]):
+        return "literature"
+    if any(word in compact for word in ["投研", "投资", "股票", "财报", "investment", "equity", "valuation", "financial"]):
+        return "investment"
+    if any(word in compact for word in ["公司调研", "公司研究", "竞品", "竞对", "competitive", "competitor", "companyresearch"]):
+        return "company"
+    if any(word in compact for word in ["行业", "市场", "market", "industry", "tam", "sam", "som"]):
+        return "market"
+    return "general"
+
+
+def _detect_web_family(task_text: str) -> str:
+    compact = _compact(task_text)
+    if any(word in compact for word in ["dashboard", "admin", "analytics", "数据看板", "仪表盘", "管理后台", "控制台"]):
+        return "dashboard"
+    if any(word in compact for word in ["reportpage", "报告页", "数据报告", "分析报告页面", "研究报告网页"]):
+        return "report"
+    if any(word in compact for word in ["landingpage", "落地页", "着陆页", "官网", "产品首页", "营销页"]):
+        return "landing"
+    if any(word in compact for word in ["webapp", "saas", "工具", "表单", "编辑器", "工作台", "交互应用"]):
+        return "app"
+    return "general"
+
+
+def _detect_video_family(task_text: str) -> str:
+    compact = _compact(task_text)
+    if any(word in compact for word in [
+        "口播", "粗剪", "删停顿", "删除停顿", "删口误", "删除口误", "talkinghead",
+        "roughcut", "jumpcut", "采访剪辑", "访谈剪辑",
+    ]):
+        return "talking_head_cut"
+    if any(word in compact for word in [
+        "动效", "动态图形", "motiongraphics", "kinetictype", "数据动画", "图表动画",
+        "字幕动效", "logosting", "lowerthird", "信息动效",
+    ]):
+        return "motion_graphics"
+    return "product_promo"
+
+
+def _figure_artifact_command(candidates: list[RecommendedSkill]) -> list[str]:
+    command = ["python3", "scripts/figure_artifact.py", "--input", "<input.txt>"]
+    for candidate in candidates:
+        if candidate.id in FIGURE_ARTIFACT_PIPELINES:
+            command.extend(["--pipeline", candidate.id])
+        elif candidate.command_arg.startswith(("http://", "https://", "/", "./", "~/")):
+            command.extend(["--skill-source", candidate.command_arg])
+    command.extend(["--run", "--judge", "--render-report", "--report-output", "./figure-artifact-report.html"])
+    return command
+
+
+def _research_artifact_command(candidates: list[RecommendedSkill]) -> list[str]:
+    command = ["python3", "scripts/research_artifact.py", "--input", "<input.txt>"]
+    for candidate in candidates:
+        if candidate.id in RESEARCH_ARTIFACT_PIPELINES:
+            command.extend(["--pipeline", candidate.id])
+        elif candidate.command_arg.startswith(("http://", "https://", "/", "./", "~/")):
+            command.extend(["--skill-source", candidate.command_arg])
+    command.extend(["--confirmed", "--run", "--judge", "--render-report", "--report-output", "./research-artifact-report.html"])
+    return command
+
+
+def _web_artifact_command(candidates: list[RecommendedSkill], catalog: dict) -> list[str]:
+    known_ids = {skill.get("id") for skill in catalog.get("skills", [])}
+    command = ["python3", "scripts/web_artifact.py", "--input", "<input.txt>"]
+    for candidate in candidates:
+        if candidate.id in known_ids:
+            command.extend(["--pipeline", candidate.id])
+        elif candidate.command_arg.startswith(("http://", "https://", "/", "./", "~/")):
+            command.extend(["--skill-source", candidate.command_arg])
+    command.extend(["--confirmed", "--run", "--judge", "--render-report", "--report-output", "./web-artifact-report.html"])
+    return command
+
+
+def _video_artifact_command(
+    candidates: list[RecommendedSkill],
+    catalog: dict,
+    video_family: str,
+) -> list[str]:
+    known_ids = {pipeline.get("id") for pipeline in catalog.get("pipelines", [])}
+    command = ["python3", "scripts/video_artifact.py", "--input", "<input.txt>"]
+    if video_family == "talking_head_cut":
+        command.extend(["--asset", "<source-video>"])
+    for candidate in candidates:
+        if candidate.id in known_ids:
+            command.extend(["--pipeline", candidate.id])
+        elif candidate.command_arg.startswith(("http://", "https://", "/", "./", "~/")):
+            command.extend(["--skill-source", candidate.command_arg])
+    command.extend(["--confirmed", "--run", "--judge", "--render-report", "--report-output", "./video-artifact-report.html"])
+    return command
+
+
+def _note_if_no_new_external(candidates: list[RecommendedSkill], notes_zh: list[str], notes_en: list[str]) -> None:
+    if not any(_is_external_candidate(candidate) for candidate in candidates):
+        notes_zh.append("外部发现候选与本地 curated 候选去重后没有新增项，最终 shortlist 暂时只包含本地候选。")
+        notes_en.append("After deduping external discovery against local curated candidates, no new external candidate remained in the shortlist.")
+
+
+def recommend_candidates(
+    task_text: str,
+    domain: str = "academic-writing",
+    max_candidates: int = 5,
+    online_discovery: bool = True,
+    local_only: Optional[bool] = None,
+    local_skill_discovery: bool = True,
+    evermind_discovery: bool = True,
+    refresh_sources: bool = False,
+) -> Recommendation:
+    """Return a small candidate set for the user's task description."""
+    catalog = load_catalog(domain)
+    signals = detect_task_signals(task_text)
+    deliverable_type = detect_deliverable_type(task_text, signals)
+    compare_mode = "artifact" if deliverable_type in {
+        "pptx", "visual_artifact", "research_report", "web_artifact", "video_artifact"
+    } else "text"
+    signal_set = set(signals)
+    candidates: list[RecommendedSkill] = []
+    notes_zh: list[str] = []
+    notes_en: list[str] = []
+    discovery_queries: list[str] = []
+    local_only = wants_local_only(task_text) if local_only is None else local_only
+    if local_only:
+        notes_zh.append("用户要求只用本地发现，已启用 ForkProbe 精选与本地 Skill 自动扫描，并跳过 GitHub 实时搜索和 EverMind 查询；精选目录中的外部条目仍会标明来源，执行前需单独确认。")
+        notes_en.append("User requested local-only discovery; ForkProbe curated and locally installed Skills remain enabled while live GitHub and EverMind queries are skipped. Curated external entries remain source-labeled and require separate confirmation before execution.")
+    network_enabled = (
+        online_discovery
+        and not local_only
+        and os.environ.get("FORKPROBE_DISCOVERY_OFFLINE") != "1"
+    )
+    online_enabled = (
+        network_enabled
+        and discover_online_skills is not None
+    )
+    evermind_enabled = network_enabled and evermind_discovery
+    pool_limit = max(max_candidates * 3, 12)
+    provider_query = build_provider_query(deliverable_type, signals)
+
+    def add_catalog(skill_id: str, reason_override: Optional[str] = None) -> None:
+        _append_unique(candidates, _catalog_skill(skill_id, catalog, reason_override), pool_limit)
+
+    def add_byo(skill_id: str) -> None:
+        candidate = BYO_COPY[skill_id]
+        candidate.source = candidate.command_arg
+        candidate.source_kind = "known_github"
+        candidate.score = candidate.score or 78
+        _append_unique(candidates, candidate, pool_limit)
+
+    def add_pipeline(pipeline_id: str) -> None:
+        candidate = _artifact_pipeline(pipeline_id)
+        candidate.score = candidate.score or 76
+        _append_unique(candidates, candidate, pool_limit)
+
+    def add_figure_pipeline(pipeline_id: str) -> None:
+        candidate = _figure_artifact_pipeline(pipeline_id)
+        candidate.score = candidate.score or 76
+        _append_unique(candidates, candidate, pool_limit)
+
+    def add_research_pipeline(pipeline_id: str) -> None:
+        candidate = _research_artifact_pipeline(pipeline_id)
+        candidate.score = candidate.score or 76
+        _append_unique(candidates, candidate, pool_limit)
+
+    web_catalog: dict = {}
+
+    def add_web_pipeline(pipeline_id: str) -> None:
+        nonlocal web_catalog
+        if not web_catalog:
+            web_catalog = load_catalog("web-artifact-skills")
+        candidate = _web_artifact_pipeline(pipeline_id, web_catalog)
+        _append_unique(candidates, candidate, pool_limit)
+
+    video_catalog: dict = {}
+
+    def add_video_pipeline(pipeline_id: str) -> None:
+        nonlocal video_catalog
+        if not video_catalog:
+            video_catalog = load_catalog("video-artifact-skills")
+        candidate = _video_artifact_pipeline(pipeline_id, video_catalog)
+        _append_unique(candidates, candidate, pool_limit)
+
+    def add_online_candidates() -> None:
+        nonlocal discovery_queries
+        if local_only:
+            return
+        if not online_enabled:
+            notes_zh.append("当前环境未启用 GitHub/网络 discovery，已使用本地 curated 候选。")
+            notes_en.append("GitHub/network discovery is not enabled in this environment; using local curated candidates.")
+            return
+        discovery = discover_online_skills(
+            deliverable=deliverable_type,
+            signals=signals,
+            limit=max(1, min(3, max_candidates - 1)),
+        )
+        discovery_queries = list(getattr(discovery, "queries", []))
+        for candidate in getattr(discovery, "candidates", []):
+            _append_unique(candidates, _skill_from_online_discovery(candidate, deliverable_type), pool_limit)
+        notes_zh.extend(getattr(discovery, "notes_zh", []))
+        notes_en.extend(getattr(discovery, "notes_en", []))
+
+    def add_provider_candidates() -> None:
+        if local_skill_discovery:
+            try:
+                local_result = LocalSkillProvider().discover(
+                    provider_query,
+                    limit=min(2, max(1, max_candidates - 1)),
+                    refresh=refresh_sources,
+                )
+                for provider_candidate in local_result.candidates:
+                    _append_unique(
+                        candidates,
+                        _skill_from_provider(provider_candidate, deliverable_type),
+                        pool_limit,
+                    )
+                notes_zh.extend(local_result.notes_zh)
+                notes_en.extend(local_result.notes_en)
+            except (OSError, ValueError) as exc:
+                notes_zh.append(f"本地 Skill 自动扫描失败，已继续使用其他来源：{exc}")
+                notes_en.append(f"Local Skill scanning failed; continued with other providers: {exc}")
+        if evermind_enabled:
+            try:
+                evermind_result = EverMindSkillHubProvider().discover(
+                    provider_query,
+                    limit=min(2, max(1, max_candidates - 1)),
+                    refresh=refresh_sources,
+                )
+                for provider_candidate in evermind_result.candidates:
+                    _append_unique(
+                        candidates,
+                        _skill_from_provider(provider_candidate, deliverable_type),
+                        pool_limit,
+                    )
+                notes_zh.extend(evermind_result.notes_zh)
+                notes_en.extend(evermind_result.notes_en)
+            except (OSError, ValueError) as exc:
+                notes_zh.append(f"EverMind Skill Hub 暂时不可用，已继续使用其他来源：{exc}")
+                notes_en.append(f"EverMind Skill Hub was unavailable; continued with other providers: {exc}")
+
+    if deliverable_type == "video_artifact":
+        video_family = _detect_video_family(task_text)
+        video_pipeline_ids = {
+            "product_promo": [
+                "baseline-remotion-agent",
+                "hyperframes-product-launch",
+                "video-shotcraft",
+            ],
+            "motion_graphics": [
+                "baseline-remotion-motion",
+                "hyperframes-motion-graphics",
+                "remotion-bits-enhanced",
+            ],
+            "talking_head_cut": [
+                "auto-editor",
+                "maxazure-video-editing",
+                "video-use-cut-only",
+                "chengfeng-cut-talking-head",
+            ],
+        }
+        for pipeline_id in video_pipeline_ids[video_family]:
+            add_video_pipeline(pipeline_id)
+        add_provider_candidates()
+        candidates = _rank_and_limit(candidates, max_candidates)
+        family_zh = {
+            "product_promo": "产品宣传片",
+            "motion_graphics": "动效视频",
+            "talking_head_cut": "口播粗剪",
+        }[video_family]
+        notes_zh.append("交互式使用时，必须先展示视频候选与路线差异，等待用户确认后再执行 suggested command。")
+        notes_zh.append(f"这是{family_zh}成品对比模式：每条 pipeline 生成独立 MP4，并统一执行 ffprobe/ffmpeg 媒体 QA。")
+        notes_en.append("In interactive use, show the video candidate shortlist and route differences first, then wait for confirmation.")
+        notes_en.append(f"This is finished-video comparison mode ({video_family}): every pipeline produces an MP4 and receives shared ffprobe/ffmpeg media QA.")
+        if video_family == "talking_head_cut":
+            notes_zh.append("口播粗剪执行时必须通过 --asset 提供同一个原始视频；cut-only 候选不得加入 B-roll、音乐或重写脚本。")
+            notes_en.append("Talking-head rough cuts require the same source video via --asset; cut-only candidates must not add B-roll, music, or rewrite the script.")
+        return Recommendation(
+            deliverable_type=deliverable_type,
+            compare_mode=compare_mode,
+            task_signals=signals,
+            candidates=candidates,
+            notes_zh=notes_zh,
+            notes_en=notes_en,
+            suggested_command=_video_artifact_command(candidates, video_catalog, video_family),
+            mode_explanation_zh=f"识别到最终交付物是{family_zh}成品，应比较同场景的视频 pipeline，而不是只比较脚本或分镜。",
+            mode_explanation_en=f"Detected a finished {video_family} deliverable. Compare pipelines within the same video scene, not just scripts or storyboards.",
+            discovery_queries=discovery_queries,
+        )
+
+    if deliverable_type == "web_artifact":
+        web_family = _detect_web_family(task_text)
+        web_pipeline_ids = {
+            "landing": [
+                "baseline-web", "anthropic-frontend-design", "hallmark-web",
+                "baoyu-design-web", "ui-ux-pro-max-web",
+            ],
+            "dashboard": [
+                "baseline-web", "anthropic-web-artifacts", "ui-ux-pro-max-web",
+                "garden-web-design-engineer", "baoyu-design-web",
+            ],
+            "app": [
+                "baseline-web", "anthropic-web-artifacts", "garden-web-design-engineer",
+                "ui-ux-pro-max-web", "baoyu-design-web",
+            ],
+            "report": [
+                "baseline-web", "anthropic-web-artifacts", "garden-web-design-engineer",
+                "baoyu-design-web", "ui-ux-pro-max-web",
+            ],
+            "general": [
+                "baseline-web", "anthropic-frontend-design", "hallmark-web",
+                "garden-web-design-engineer", "baoyu-design-web",
+            ],
+        }
+        for pipeline_id in web_pipeline_ids[web_family]:
+            add_web_pipeline(pipeline_id)
+        add_provider_candidates()
+        add_online_candidates()
+        candidates = _rank_and_limit(candidates, max_candidates)
+        notes_zh.append("交互式使用时，必须先展示网页候选和适用差异，等待用户确认后再执行 suggested command。")
+        notes_zh.append("这是网页成品对比模式：每条 pipeline 生成独立可运行页面，并统一产出桌面/移动端截图、页面链接、源文件、QA 和 AI 评审。")
+        notes_zh.append("只想比较页面方案、wireframe 或 prompt 时，应切回 text 模式。")
+        notes_en.append("In interactive use, show the web candidate shortlist and fit differences first, then wait for confirmation before running the suggested command.")
+        notes_en.append("This is finished-webpage comparison mode: every pipeline produces a runnable page plus desktop/mobile screenshots, a page link, source files, QA, and AI judge notes.")
+        notes_en.append("Switch back to text mode when the user only wants a page brief, wireframe, or prompt.")
+        return Recommendation(
+            deliverable_type=deliverable_type,
+            compare_mode=compare_mode,
+            task_signals=signals,
+            candidates=candidates,
+            notes_zh=notes_zh,
+            notes_en=notes_en,
+            suggested_command=_web_artifact_command(candidates, web_catalog),
+            mode_explanation_zh=f"识别到最终交付物是可运行网页成品（{web_family}），应比较网页生成 pipeline，而不是只比较设计方案文字。",
+            mode_explanation_en=f"Detected a runnable webpage deliverable ({web_family}). Compare webpage-generation pipelines, not just design-plan text.",
+            discovery_queries=discovery_queries,
+        )
+
+    if deliverable_type == "research_report":
+        research_family = _detect_research_family(task_text)
+        if research_family == "user":
+            for pipeline_id in ["baseline-research-report", "user-research-cookiy-report", "evidence-table-report", "source-first-research"]:
+                add_research_pipeline(pipeline_id)
+        elif research_family == "company":
+            for pipeline_id in ["baseline-research-report", "company-research-report", "source-first-research", "analyst-style-report"]:
+                add_research_pipeline(pipeline_id)
+        elif research_family == "literature":
+            for pipeline_id in ["baseline-research-report", "literature-review-report", "source-first-research", "evidence-table-report"]:
+                add_research_pipeline(pipeline_id)
+        elif research_family == "investment":
+            for pipeline_id in ["baseline-research-report", "investment-research-report", "analyst-style-report", "source-first-research"]:
+                add_research_pipeline(pipeline_id)
+        else:
+            for pipeline_id in ["baseline-research-report", "source-first-research", "analyst-style-report", "evidence-table-report"]:
+                add_research_pipeline(pipeline_id)
+        add_provider_candidates()
+        candidates = _rank_and_limit(candidates, max_candidates)
+        notes_zh.append("交互式使用时，必须先把这组调研报告候选展示给用户并等待确认；用户确认后再运行 suggested command。")
+        notes_zh.append("这是调研报告成品对比模式：确认后应让每条 pipeline 各生成一个 research package，再用 artifact report 展示报告预览、sources.json、evidence table、claim checks、limitations 和 AI 评审。")
+        notes_zh.append("如果用户只是想比较调研提纲、问题清单或访谈大纲，应切回 text 模式。")
+        notes_en.append("In interactive use, first show this research-report shortlist to the user and wait for confirmation; only then run the suggested command.")
+        notes_en.append("This is research report artifact comparison mode: each pipeline should generate its own research package, then compare report preview, sources.json, evidence table, claim checks, limitations, and AI judge notes.")
+        notes_en.append("If the user only wants a research outline, question list, or interview guide, switch back to text mode.")
+        return Recommendation(
+            deliverable_type=deliverable_type,
+            compare_mode=compare_mode,
+            task_signals=signals,
+            candidates=candidates,
+            notes_zh=notes_zh,
+            notes_en=notes_en,
+            suggested_command=_research_artifact_command(candidates),
+            mode_explanation_zh="识别到最终交付物是调研报告成品，应比较 research report 生成 pipeline，而不是只比较提纲或短回答。",
+            mode_explanation_en="Detected a finished research report deliverable. Compare research-report generation pipelines, not just outlines or short answers.",
+            discovery_queries=discovery_queries,
+        )
+
+    if deliverable_type == "pptx":
+        if discover_skill_pipelines:
+            discovery = discover_skill_pipelines(
+                deliverable="pptx",
+                query=task_text,
+                limit=max_candidates,
+                local_only=False,
+            )
+            for pipeline in discovery.shortlist:
+                _append_unique(candidates, _pipeline_from_discovery(pipeline), pool_limit)
+            notes_zh.extend(discovery.notes_zh)
+            notes_en.extend(discovery.notes_en)
+        else:
+            add_pipeline("baseline-presentations")
+            add_pipeline("nature-paper2ppt-presentations")
+            add_pipeline("pptx-direct")
+            add_pipeline("storyboard-presentations")
+        add_provider_candidates()
+        add_online_candidates()
+        candidates = _rank_and_limit(candidates, max_candidates)
+        _note_if_no_new_external(candidates, notes_zh, notes_en)
+        notes_zh.append("这是 PPTX 成品对比模式：确认后应让每条 pipeline 各生成一个 .pptx，再用文件链接/缩略图/AI 评审并排比较。")
+        notes_zh.append("不要把任务改写成“不要生成 PPTX”的大纲任务，除非用户明确只想先看方案。")
+        notes_en.append("This is PPTX artifact comparison mode: each pipeline should generate its own .pptx, then compare files/previews/judge notes side by side.")
+        notes_en.append("Do not rewrite this as an outline-only task unless the user explicitly asks for a plan only.")
+        return Recommendation(
+            deliverable_type=deliverable_type,
+            compare_mode=compare_mode,
+            task_signals=signals,
+            candidates=candidates,
+            notes_zh=notes_zh,
+            notes_en=notes_en,
+            suggested_command=[],
+            mode_explanation_zh="识别到最终交付物是 PPTX 文件，应比较 PPT 生成 pipeline，而不是只比较 PPT 方案文字。",
+            mode_explanation_en="Detected a PPTX deliverable. Compare PPT generation pipelines, not just outline text.",
+            discovery_queries=discovery_queries,
+        )
+
+    if deliverable_type == "visual_artifact":
+        figure_family = _detect_figure_family(task_text)
+        if figure_family == "plot":
+            for pipeline_id in ["baseline-python-figure", "plot-code-python", "nature-figure-python", "schematic-svg"]:
+                add_figure_pipeline(pipeline_id)
+        elif figure_family == "schematic":
+            for pipeline_id in ["baseline-python-figure", "schematic-svg", "nature-figure-python", "graphical-abstract-svg"]:
+                add_figure_pipeline(pipeline_id)
+        elif figure_family == "graphical_abstract":
+            for pipeline_id in ["baseline-python-figure", "graphical-abstract-svg", "nature-figure-python", "schematic-svg"]:
+                add_figure_pipeline(pipeline_id)
+        else:
+            for pipeline_id in ["baseline-python-figure", "nature-figure-python", "plot-code-python", "schematic-svg"]:
+                add_figure_pipeline(pipeline_id)
+        add_provider_candidates()
+        add_online_candidates()
+        candidates = _rank_and_limit(candidates, max_candidates)
+        _note_if_no_new_external(candidates, notes_zh, notes_en)
+        notes_zh.append("这是论文作图/科研绘图成品对比模式：确认后应让每条 pipeline 各生成一个 figure package，再用 artifact report 展示 PNG 预览、SVG/PDF/TIFF、代码、caption 和 QA。")
+        notes_zh.append("如果用户明确只想比较图注、storyline 或说明文字，应切回 text 模式。")
+        notes_en.append("This is scientific figure artifact comparison mode: each pipeline should generate its own figure package, then compare PNG previews, SVG/PDF/TIFF, code, caption, and QA notes in the artifact report.")
+        notes_en.append("If the user explicitly wants only captions, storyline, or explanatory text, switch back to text mode.")
+        return Recommendation(
+            deliverable_type=deliverable_type,
+            compare_mode=compare_mode,
+            task_signals=signals,
+            candidates=candidates,
+            notes_zh=notes_zh,
+            notes_en=notes_en,
+            suggested_command=_figure_artifact_command(candidates),
+            mode_explanation_zh="识别到最终交付物是科研图/论文 figure 成品，应比较 figure 生成 pipeline，而不是只比较图注或说明文字。",
+            mode_explanation_en="Detected a scientific figure deliverable. Compare figure-generation pipelines, not just captions or explanatory text.",
+            discovery_queries=discovery_queries,
+        )
+
+    add_catalog("baseline")
+
+    if "figure" in signal_set:
+        add_byo("nature-figure")
+        add_catalog("paper-writer-skill", "适合先梳理 figure narrative、结果逻辑和图注表达。")
+        add_catalog("research-paper-writing-skills", "适合中文科研图注、结果描述和论文语境表达。")
+        notes_zh.append("当前识别为图注/storyline/说明文字对比；如果最终要科研图成品，请切换到 figure artifact 模式。")
+        notes_en.append("This is recognized as caption/storyline/explanatory text comparison; switch to figure artifact mode for finished scientific figures.")
+    elif "slides" in signal_set:
+        add_byo("nature-paper2ppt")
+        add_catalog("paper-writer-skill", "适合把论文结构转成正式汇报逻辑。")
+        add_catalog("research-paper-writing-skills", "适合中文科研汇报中的论文表达和结构。")
+        notes_zh.append("当前识别为 PPT 方案/大纲对比；如果用户要 PPTX 成品，请切换到 artifact 模式比较生成 pipeline。")
+        notes_en.append("This is recognized as PPT plan/outline comparison; switch to artifact mode for finished PPTX pipeline comparison.")
+    elif "rebuttal" in signal_set:
+        add_catalog("paper-writer-skill")
+        add_byo("nature-response")
+        add_catalog("writing-anti-ai", "适合让回复语气更自然、克制，减少模板感。")
+        add_catalog("research-paper-writing-skills", "适合中文起草后再转成正式科研回复。")
+    elif "anti_ai" in signal_set:
+        is_chinese_anti_ai = "zh" in signal_set or "chinese_academic" in signal_set
+        is_english_anti_ai = "english" in signal_set or "nature" in signal_set
+        if is_chinese_anti_ai:
+            add_catalog("writing-anti-ai")
+            add_catalog("humanizer-zh")
+            add_catalog("remove-ai-flavor-writing-skill")
+            add_catalog("research-paper-writing-skills")
+        elif is_english_anti_ai:
+            add_catalog("humanizer")
+            add_catalog("stop-slop")
+            add_catalog("avoid-ai-writing")
+            add_catalog("academic-humanizer")
+        else:
+            add_catalog("writing-anti-ai")
+            add_catalog("humanizer-zh")
+            add_catalog("humanizer")
+            add_catalog("stop-slop")
+        notes_zh.append("v0.4 去 AI 味写作模式：优先比较专门的 anti-AI / humanizer skill，并避免把任务降级成普通润色。")
+        notes_en.append("v0.4 anti-AI writing mode: prioritize dedicated anti-AI/humanizer skills instead of treating the task as generic polishing.")
+    elif "english" in signal_set or "nature" in signal_set:
+        add_catalog("paper-writer-skill")
+        add_byo("nature-polishing")
+        add_catalog("humanizer")
+        add_catalog("research-paper-writing-skills")
+    else:
+        add_catalog("writing-anti-ai")
+        add_catalog("humanizer-zh")
+        add_catalog("research-paper-writing-skills")
+        add_catalog("paper-writer-skill")
+        if "zh" not in signal_set:
+            add_catalog("humanizer")
+
+    add_provider_candidates()
+    add_online_candidates()
+    candidates = _rank_and_limit(candidates, max_candidates)
+    _note_if_no_new_external(candidates, notes_zh, notes_en)
+
+    command = [
+        "python3", "scripts/compare.py", "--input", "<input.txt>",
+        "--task-type", text_task_type(deliverable_type, signals),
+    ]
+    for candidate in candidates:
+        if candidate.runnable:
+            command.extend(["--skill", candidate.command_arg])
+    command.extend(["--judge", "--output", "./report.html"])
+
+    return Recommendation(
+        deliverable_type=deliverable_type,
+        compare_mode=compare_mode,
+        task_signals=signals,
+        candidates=candidates,
+        notes_zh=notes_zh,
+        notes_en=notes_en,
+        suggested_command=command,
+        mode_explanation_zh="识别到文本产物或方案产物，可用 compare.py 做并排文本对比。",
+        mode_explanation_en="Detected a text or planning deliverable; compare.py can run a side-by-side text comparison.",
+        discovery_queries=discovery_queries,
+    )
+
+
+def format_text(recommendation: Recommendation, input_path: str = "<input.txt>", lang: str = "zh") -> str:
+    command = list(recommendation.suggested_command)
+    if "--input" in command:
+        command[command.index("--input") + 1] = input_path
+    command_text = " ".join(shlex.quote(part) for part in command)
+
+    if lang == "en":
+        if recommendation.compare_mode == "artifact":
+            lines = ["forkprobe should compare artifact-generation pipelines. Please confirm or edit before running.", ""]
+        else:
+            lines = ["forkprobe can compare these skills. Please confirm or edit before running.", ""]
+        lines.append(f"Deliverable: {recommendation.deliverable_type} · Mode: {recommendation.compare_mode}")
+        if recommendation.mode_explanation_en:
+            lines.append(recommendation.mode_explanation_en)
+        lines.append("Signals: " + ", ".join(recommendation.task_signals))
+        if recommendation.discovery_queries:
+            lines.append("Discovery queries: " + " | ".join(recommendation.discovery_queries))
+        lines.append("")
+        for idx, candidate in enumerate(recommendation.candidates, start=1):
+            author = f" · {candidate.author}" if candidate.author else ""
+            lines.append(f"{idx}. {candidate.name}{author}")
+            lines.append(f"   {candidate.reason_en}")
+            if _is_external_candidate(candidate) or candidate.source_kind == "local_installed":
+                source_label = _source_label(candidate, "en")
+                stars = f" · {candidate.stars} stars" if candidate.stars else ""
+                source_quality = _source_quality_text(candidate, "en")
+                installed = " · installed" if candidate.installed else ""
+                license_name = f" · {candidate.license}" if candidate.license else ""
+                lines.append(f"   Source: {source_label} · match {candidate.score}/100{source_quality}{stars}{installed}{license_name}")
+            if candidate.pipeline_steps:
+                lines.append(f"   Pipeline: {' → '.join(candidate.pipeline_steps)}")
+            if candidate.caution_en:
+                lines.append(f"   Note: {candidate.caution_en}")
+        if recommendation.notes_en:
+            lines.append("")
+            lines.extend(f"Note: {note}" for note in recommendation.notes_en)
+        lines.append("")
+        if recommendation.compare_mode == "artifact":
+            lines.append("After confirmation:")
+            if recommendation.suggested_command:
+                lines.append(command_text)
+                if recommendation.deliverable_type == "visual_artifact":
+                    lines.append("This creates one workspace per figure pipeline, runs candidates, judges the artifact summaries, and renders the report. You can also add files to a candidate's artifacts folder and re-render.")
+                elif recommendation.deliverable_type == "research_report":
+                    lines.append("This creates one workspace per research-report pipeline, runs candidates, judges the artifact summaries, and renders the report. You can also add files to a candidate's artifacts folder and re-render.")
+                elif recommendation.deliverable_type == "web_artifact":
+                    lines.append("This creates one workspace per web pipeline, builds runnable pages, captures desktop/mobile screenshots, runs QA and AI judging, and renders the comparison report.")
+                else:
+                    lines.append("This creates one workspace per artifact pipeline, runs candidates, judges the artifact summaries, and renders the report. You can also add files to a candidate's artifacts folder and re-render.")
+            elif recommendation.deliverable_type == "pptx":
+                lines.append("Generate one PPTX per pipeline, then render an artifact comparison report with file links/previews.")
+            else:
+                lines.append("Generate one artifact package per pipeline, then render an artifact comparison report with file links/previews.")
+        else:
+            lines.append("Suggested command after confirmation:")
+            lines.append(command_text)
+        return "\n".join(lines)
+
+    if recommendation.compare_mode == "artifact":
+        lines = ["forkprobe 应该并排比较这些文件生成 pipeline。请确认或增删后再运行。", ""]
+    else:
+        lines = ["forkprobe 可以先并排比较这组 skill。请确认或增删后再运行。", ""]
+    lines.append(f"交付物: {recommendation.deliverable_type} · 模式: {recommendation.compare_mode}")
+    if recommendation.mode_explanation_zh:
+        lines.append(recommendation.mode_explanation_zh)
+    lines.append("识别到的任务信号: " + ", ".join(recommendation.task_signals))
+    if recommendation.discovery_queries:
+        lines.append("外部发现 query: " + " | ".join(recommendation.discovery_queries))
+    lines.append("")
+    for idx, candidate in enumerate(recommendation.candidates, start=1):
+        author = f" · {candidate.author}" if candidate.author else ""
+        lines.append(f"{idx}. {candidate.name}{author}")
+        lines.append(f"   {candidate.reason_zh}")
+        if _is_external_candidate(candidate) or candidate.source_kind == "local_installed":
+            source_label = _source_label(candidate, "zh")
+            stars = f" · {candidate.stars} stars" if candidate.stars else ""
+            source_quality = _source_quality_text(candidate, "zh")
+            installed = " · 已安装" if candidate.installed else ""
+            license_name = f" · {candidate.license}" if candidate.license else ""
+            lines.append(f"   来源: {source_label} · 匹配 {candidate.score}/100{source_quality}{stars}{installed}{license_name}")
+        if candidate.pipeline_steps:
+            lines.append(f"   Pipeline: {' → '.join(candidate.pipeline_steps)}")
+        if candidate.caution_zh:
+            lines.append(f"   注意: {candidate.caution_zh}")
+    if recommendation.notes_zh:
+        lines.append("")
+        lines.extend(f"注意: {note}" for note in recommendation.notes_zh)
+    lines.append("")
+    if recommendation.compare_mode == "artifact":
+        lines.append("确认后执行方式:")
+        if recommendation.suggested_command:
+            lines.append(command_text)
+            if recommendation.deliverable_type == "visual_artifact":
+                lines.append("这会为每条科研图 pipeline 创建独立 workspace、试跑候选、评审 artifact 摘要并渲染 report；也可以手动补充某个候选的 artifacts 后重新渲染。")
+            elif recommendation.deliverable_type == "research_report":
+                lines.append("这会为每条调研报告 pipeline 创建独立 workspace、试跑候选、评审 artifact 摘要并渲染 report；也可以手动补充某个候选的 artifacts 后重新渲染。")
+            elif recommendation.deliverable_type == "web_artifact":
+                lines.append("这会为每条网页 pipeline 创建独立 workspace、生成可运行网页、截取桌面/移动端预览、执行 QA 与 AI 评审，并渲染横向对比 report。")
+            else:
+                lines.append("这会为每条文件生成 pipeline 创建独立 workspace、试跑候选、评审 artifact 摘要并渲染 report；也可以手动补充某个候选的 artifacts 后重新渲染。")
+        elif recommendation.deliverable_type == "pptx":
+            lines.append("让每条 pipeline 各生成一个 PPTX，再用 artifact report 展示文件链接、关键页预览和 AI 评审。")
+        else:
+            lines.append("让每条 pipeline 各生成一个 artifact package，再用 artifact report 展示文件链接、预览和 AI 评审。")
+    else:
+        lines.append("确认后可运行:")
+        lines.append(command_text)
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Recommend forkprobe candidate skills for a task")
+    parser.add_argument("--input", help="Path to task input or task description")
+    parser.add_argument("--text", help="Task description text. Used when --input is omitted")
+    parser.add_argument("--domain", default="academic-writing", help="Catalog domain")
+    parser.add_argument("--max-candidates", type=int, default=5, help="Maximum candidates including baseline")
+    parser.add_argument("--lang", choices=["zh", "en"], default="zh", help="Output language")
+    parser.add_argument("--local-only", action="store_true", help="Use curated and locally installed Skills; skip GitHub, EverMind, and other network discovery")
+    parser.add_argument("--no-local-skills", action="store_true", help="Do not scan installed local Skill directories")
+    parser.add_argument("--no-evermind", action="store_true", help="Skip EverMind Skill Hub while keeping other enabled sources")
+    parser.add_argument("--refresh-sources", action="store_true", help="Refresh local and external provider indexes instead of preferring cached data")
+    parser.add_argument("--json", action="store_true", help="Print JSON instead of human-readable text")
+    args = parser.parse_args()
+
+    input_label = "<input.txt>"
+    if args.input:
+        input_path = Path(args.input)
+        task_text = input_path.read_text(encoding="utf-8")
+        input_label = str(input_path)
+    elif args.text:
+        task_text = args.text
+    else:
+        task_text = sys.stdin.read()
+
+    recommendation = recommend_candidates(
+        task_text=task_text,
+        domain=args.domain,
+        max_candidates=args.max_candidates,
+        local_only=args.local_only,
+        local_skill_discovery=not args.no_local_skills,
+        evermind_discovery=not args.no_evermind,
+        refresh_sources=args.refresh_sources,
+    )
+    if args.json:
+        print(json.dumps(asdict(recommendation), ensure_ascii=False, indent=2))
+    else:
+        print(format_text(recommendation, input_path=input_label, lang=args.lang))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
