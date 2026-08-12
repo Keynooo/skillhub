@@ -28,6 +28,9 @@ set +H  # 关 histexpand
 COMPOSE="docker compose --env-file .env.release -f compose.release.yml -f compose.verify.yml"
 OUT_DIR="${OUT_DIR:-./sync-out}"
 QINIU_KEY="${QINIU_KEY:-skillhub-sync/latest.tar.gz}"
+
+# 记录上次导出的内容 hash，用于跳过无变更的上传
+EXPORT_STATE_FILE="${EXPORT_STATE_FILE:-$HOME/.skillhub-sync/last-export-hash}"
 STORAGE_ROOT="/var/lib/skillhub/storage"  # compose.release.yml 的 STORAGE_BASE_PATH
 
 # 从 .env.release 取 PG 账号（deploy-release.sh 写进去的）
@@ -115,14 +118,17 @@ else
 	if [[ -n "${QINIU_AK:-}" && -n "${QINIU_SK:-}" ]]; then
 		qshell account "$QINIU_AK" "$QINIU_SK" skillhub-sync >/dev/null
 	fi
-	# 先查远程 hash，跟本地一样就跳过（无变更不浪费上传）
+	# 跟上次导出的内容 hash 比，一样就跳过（无变更不浪费上传+存储）
 	LOCAL_HASH="$(sha256sum "$PKG" | cut -d' ' -f1)"
-	REMOTE_HASH="$(qshell stat "$QINIU_BUCKET" "$QINIU_KEY" 2>/dev/null | grep -i '^Hash:' | awk '{print $2}' || true)"
-	if [[ -n "${REMOTE_HASH:-}" && "$LOCAL_HASH" == "$REMOTE_HASH" ]]; then
-		echo "    ⊘ 跳过上传（内容未变，远程 hash: $REMOTE_HASH）"
+	LAST_EXPORT_HASH="$(cat "$EXPORT_STATE_FILE" 2>/dev/null || true)"
+	if [[ -n "${LAST_EXPORT_HASH:-}" && "$LOCAL_HASH" == "$LAST_EXPORT_HASH" ]]; then
+		echo "    ⊘ 跳过上传（内容未变，hash: $LOCAL_HASH）"
 	else
 		qshell fput "$QINIU_BUCKET" "$QINIU_KEY" "$PKG" --overwrite
 		echo "    ✅ 已上传: ${QINIU_BUCKET}/${QINIU_KEY}"
+		mkdir -p "$(dirname "$EXPORT_STATE_FILE")"
+		echo "$LOCAL_HASH" > "$EXPORT_STATE_FILE"
+		echo "    已记录 hash: $LOCAL_HASH"
 	fi
 fi
 
