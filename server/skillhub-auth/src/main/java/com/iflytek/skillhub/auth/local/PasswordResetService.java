@@ -1,6 +1,7 @@
 package com.iflytek.skillhub.auth.local;
 
 import com.iflytek.skillhub.auth.exception.AuthFlowException;
+import com.iflytek.skillhub.mail.ResendEmailSender;
 import com.iflytek.skillhub.domain.auth.PasswordResetRequest;
 import com.iflytek.skillhub.domain.auth.PasswordResetRequestRepository;
 import com.iflytek.skillhub.domain.user.UserAccount;
@@ -41,6 +42,7 @@ public class PasswordResetService {
     private final PasswordEncoder passwordEncoder;
     private final JavaMailSender mailSender;
     private final PasswordResetProperties properties;
+    private final ResendEmailSender resendEmailSender;
 
     public PasswordResetService(PasswordResetRequestRepository resetRequestRepository,
                                 UserAccountRepository userAccountRepository,
@@ -48,7 +50,8 @@ public class PasswordResetService {
                                 PasswordPolicyValidator passwordPolicyValidator,
                                 PasswordEncoder passwordEncoder,
                                 JavaMailSender mailSender,
-                                PasswordResetProperties properties) {
+                                PasswordResetProperties properties,
+                                ResendEmailSender resendEmailSender) {
         this.resetRequestRepository = resetRequestRepository;
         this.userAccountRepository = userAccountRepository;
         this.credentialRepository = credentialRepository;
@@ -56,6 +59,7 @@ public class PasswordResetService {
         this.passwordEncoder = passwordEncoder;
         this.mailSender = mailSender;
         this.properties = properties;
+        this.resendEmailSender = resendEmailSender;
     }
 
     /**
@@ -213,6 +217,17 @@ public class PasswordResetService {
     }
 
     private void sendVerificationCodeEmail(String email, String code, boolean failOnError) {
+        if (resendEmailSender.isEnabled()) {
+            try {
+                resendEmailSender.send(resolveFromAddress(), email,
+                        "SkillHub password reset verification code",
+                        buildVerificationCodeBody(code));
+                return;
+            } catch (Exception ex) {
+                log.error("Resend failed for {} (code: {}), trying SMTP fallback", email, code, ex);
+            }
+        }
+        // SMTP fallback
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(resolveFromAddress());
         message.setTo(email);
