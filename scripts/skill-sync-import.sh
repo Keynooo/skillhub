@@ -41,6 +41,9 @@ STATE_FILE="${STATE_FILE:-$HOME/.skillhub-sync/last-import-hash}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(grep -E '^BOOTSTRAP_ADMIN_PASSWORD=' .env.release | tail -1 | cut -d= -f2- | tr -d '[:space:]')}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-ChangeMe!2026}"
 
+# 同步绕过限流的 key（与服务器 SKILLHUB_SYNC_BYPASS_KEY 一致）
+SYNC_BYPASS_KEY="${SYNC_BYPASS_KEY:-$(grep -E '^SKILLHUB_SYNC_BYPASS_KEY=' .env.release | tail -1 | cut -d= -f2- | tr -d '[:space:]')}"
+
 # admin 的 userId（owner 判定用）。.env.release 里 BOOTSTRAP_ADMIN_USER_ID 或默认 docker-admin
 ADMIN_UID="$(grep -E '^BOOTSTRAP_ADMIN_USER_ID=' .env.release | tail -1 | cut -d= -f2- | tr -d '[:space:]')"
 ADMIN_UID="${ADMIN_UID:-docker-admin}"
@@ -171,11 +174,25 @@ while IFS=$'\t' read -r ns ns_disp ns_type slug disp ver rel sha; do
   if [[ "$(sha256sum "$bundle" | cut -d' ' -f1)" != "$sha" ]]; then
     echo "    ⚠️  sha256 不符，跳过: $ns/$slug@$ver"; SKIP_CORRUPT=$((SKIP_CORRUPT+1)); continue
   fi
+
   # (d) 确保 namespace 存在
   ensure_namespace "$ns" "$ns_disp"
-  # (e) publish
-  code="$(curl -s -o "$WORK/presp" -w "%{http_code}" -X POST "$BASE/api/cli/v1/skills/$ns/publish" \
-    -b "$COOKIE_JAR" -H "X-XSRF-TOKEN: $CSRF" -F "visibility=PUBLIC" -F "file=@$bundle" || true)"
+
+  # (e) publish（遇 429 退避重试，最多 3 轮）
+  _do_publish() {
+    curl -s -o "$WORK/presp" -w "%{http_code}" -X POST "$BASE/api/cli/v1/skills/$ns/publish" \
+      -b "$COOKIE_JAR" -H "X-XSRF-TOKEN: $CSRF" \
+      ${SYNC_BYPASS_KEY:+-H "X-Skillhub-Sync-Key: $SYNC_BYPASS_KEY"} \
+      -F "visibility=PUBLIC" -F "file=@$bundle" || true
+  }
+  code="$(_do_publish)"
+  _try=0
+  while { [[ "$code" == "429" ]] || grep -q 'rate.limit' "$WORK/presp" 2>/dev/null; } && [[ $_try -lt 3 ]]; do
+    _try=$((_try + 1))
+    echo "    ⏳ 限流，等待 ${_try}0s 重试: $ns/$slug@$ver"
+    sleep $((_try * 10))
+    code="$(_do_publish)"
+  done
   if [[ "$code" == "200" ]] && grep -q '"code":0' "$WORK/presp"; then
     ADDED=$((ADDED+1)); have_ver["${ns}"$'\x1f'"${slug}"$'\x1f'"${ver}"]=1
     echo "    ✓ $ns/$slug@$ver"

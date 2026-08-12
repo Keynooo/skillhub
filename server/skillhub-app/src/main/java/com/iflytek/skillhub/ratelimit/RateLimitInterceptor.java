@@ -18,6 +18,11 @@ import java.util.Map;
 /**
  * Enforces the {@link RateLimit} annotation by resolving caller identity and delegating quota
  * checks to the configured rate limiter implementation.
+ *
+ * <p>Supports a sync bypass header: when an authenticated request carries
+ * {@code X-Skillhub-Sync-Key} whose value matches the {@code SKILLHUB_SYNC_BYPASS_KEY}
+ * env var, the rate limit is skipped entirely.  Intended for automated cross-instance
+ * skill sync where the caller is already a SUPER_ADMIN.</p>
  */
 @Component
 public class RateLimitInterceptor implements HandlerInterceptor {
@@ -28,6 +33,12 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private final ApiResponseFactory apiResponseFactory;
     private final ObjectMapper objectMapper;
     private final SkillHubMetrics metrics;
+
+    /** Header that carries the bypass key. */
+    static final String SYNC_BYPASS_HEADER = "X-Skillhub-Sync-Key";
+
+    /** Configured bypass key; {@code null} disables the bypass. */
+    private static final String SYNC_BYPASS_KEY = System.getenv("SKILLHUB_SYNC_BYPASS_KEY");
 
     public RateLimitInterceptor(RateLimiter rateLimiter,
                                 ClientIpResolver clientIpResolver,
@@ -54,6 +65,15 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
         if (rateLimit == null) {
             return true;
+        }
+
+        // Sync bypass: authenticated + matching header → skip rate limit entirely
+        if (SYNC_BYPASS_KEY != null && !SYNC_BYPASS_KEY.isEmpty()) {
+            String userId = (String) request.getAttribute("userId");
+            String bypassHeader = request.getHeader(SYNC_BYPASS_HEADER);
+            if (userId != null && SYNC_BYPASS_KEY.equals(bypassHeader)) {
+                return true;
+            }
         }
 
         // Determine if user is authenticated

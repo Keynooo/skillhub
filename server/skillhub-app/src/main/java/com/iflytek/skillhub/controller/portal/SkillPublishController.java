@@ -48,7 +48,7 @@ public class SkillPublishController extends BaseApiController {
      * extraction and visibility parsing.
      */
     @PostMapping("/{namespace}/publish")
-    @RateLimit(category = "publish", authenticated = 10, anonymous = 0)
+    @RateLimit(category = "publish", authenticated = 30, anonymous = 0)
     public ApiResponse<PublishResponse> publish(
             @PathVariable String namespace,
             @RequestParam("file") MultipartFile file,

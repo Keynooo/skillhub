@@ -101,3 +101,4 @@ charts/skillhub/charts/*.tgz
 scripts/qshell*
 scripts/.env.qiniu
 sync-out/
+skillhub-sync/
