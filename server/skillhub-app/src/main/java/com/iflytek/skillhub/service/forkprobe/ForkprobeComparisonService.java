@@ -3,6 +3,7 @@ package com.iflytek.skillhub.service.forkprobe;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iflytek.skillhub.config.AnthropicProperties;
+import com.iflytek.skillhub.config.ForkprobeExecutorProperties;
 import com.iflytek.skillhub.domain.skill.service.SkillQueryService;
 import com.iflytek.skillhub.dto.forkprobe.CandidateResult;
 import com.iflytek.skillhub.dto.forkprobe.CompareResponse;
@@ -88,6 +89,7 @@ public class ForkprobeComparisonService {
             SkillQueryService skillQueryService,
             AnthropicService anthropicService,
             AnthropicProperties anthropicProperties,
+            ForkprobeExecutorProperties executorProperties,
             @Value("${skillhub.forkprobe.max-skills:3}") int maxSkills,
             @Value("${skillhub.forkprobe.max-skills-cap:5}") int maxSkillsCap,
             @Value("${skillhub.forkprobe.comparison-ttl-minutes:30}") int comparisonTtlMinutes,
@@ -98,7 +100,9 @@ public class ForkprobeComparisonService {
         this.maxSkillsCap = maxSkillsCap;
         this.comparisonTtlMinutes = comparisonTtlMinutes;
         this.reviewMaxTokens = reviewMaxTokens;
-        this.skillExecutor = new DirectApiSkillExecutor(anthropicService, anthropicProperties.getMaxTokens());
+        this.skillExecutor = "claude-cli".equalsIgnoreCase(executorProperties.getMode())
+                ? new ClaudeCodeSubprocessExecutor(anthropicService, executorProperties)
+                : new DirectApiSkillExecutor(anthropicService, anthropicProperties.getMaxTokens());
         this.comparisonExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
         // Periodic cleanup of stale comparisons

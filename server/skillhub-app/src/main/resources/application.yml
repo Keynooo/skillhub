@@ -108,6 +108,14 @@ skillhub:
     max-skills-cap: 5
     comparison-ttl-minutes: 30
     review-max-tokens: 1024
+    executor:
+      mode: ${SKILLHUB_FORKPROBE_EXECUTOR_MODE:direct-api}
+      claude-cli-path: ${SKILLHUB_FORKPROBE_EXECUTOR_CLAUDE_CLI_PATH:claude}
+      timeout-seconds: ${SKILLHUB_FORKPROBE_EXECUTOR_TIMEOUT_SECONDS:300}
+      max-budget-usd: ${SKILLHUB_FORKPROBE_EXECUTOR_MAX_BUDGET_USD:1.0}
+      effort: ${SKILLHUB_FORKPROBE_EXECUTOR_EFFORT:low}
+      model: ${SKILLHUB_FORKPROBE_EXECUTOR_MODEL:}
+      dangerously-skip-permissions: ${SKILLHUB_FORKPROBE_EXECUTOR_DANGEROUSLY_SKIP_PERMISSIONS:true}
   redis:
     sentinel:
       check-sentinels-list: ${SKILLHUB_REDIS_SENTINEL_CHECK_SENTINELS_LIST:true}
