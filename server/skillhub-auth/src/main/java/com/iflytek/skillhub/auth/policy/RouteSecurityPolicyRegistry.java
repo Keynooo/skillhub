@@ -54,6 +54,7 @@ public class RouteSecurityPolicyRegistry {
             RouteAuthorizationPolicy.permitAll(HttpMethod.GET, "/api/v1/labels"),
             RouteAuthorizationPolicy.permitAll(HttpMethod.GET, "/api/web/skills"),
             RouteAuthorizationPolicy.permitAll(HttpMethod.GET, "/api/web/skills/*/*"),
+            RouteAuthorizationPolicy.permitAll(HttpMethod.GET, "/api/web/skills/*/*/similar"),
             RouteAuthorizationPolicy.permitAll(HttpMethod.GET, "/api/web/skills/*/*/versions"),
             RouteAuthorizationPolicy.permitAll(HttpMethod.GET, "/api/web/skills/*/*/versions/*"),
             RouteAuthorizationPolicy.permitAll(HttpMethod.GET, "/api/web/skills/*/*/download"),

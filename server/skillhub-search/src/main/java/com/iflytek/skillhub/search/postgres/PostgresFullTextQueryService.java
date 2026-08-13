@@ -7,6 +7,7 @@ import com.iflytek.skillhub.search.SearchQuery;
 import com.iflytek.skillhub.search.SearchQueryService;
 import com.iflytek.skillhub.search.SearchResult;
 import com.iflytek.skillhub.search.SearchTextTokenizer;
+import com.iflytek.skillhub.search.SearchVisibilityScope;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import java.util.Comparator;
@@ -262,6 +263,65 @@ public class PostgresFullTextQueryService implements SearchQueryService {
         }
 
         return new SearchResult(skillIds, total, query.page(), query.size());
+    }
+
+    /**
+     * Ranks visible skills by lexical-hash vector similarity to the target
+     * skill's own search text. Full-text keyword matching is intentionally
+     * bypassed here — keyword AND-predicates are too restrictive for "find
+     * skills like this one", so we rank the whole visible candidate set by
+     * cosine similarity of the stored semantic vectors instead.
+     */
+    @Override
+    public List<Long> findSimilarSkillIds(Long skillId, int limit, SearchVisibilityScope scope) {
+        if (skillId == null || limit <= 0
+                || searchDocumentRepository == null || searchEmbeddingService == null) {
+            return List.of();
+        }
+        SkillSearchDocumentEntity target = searchDocumentRepository.findBySkillId(skillId).orElse(null);
+        if (target == null) {
+            return List.of();
+        }
+        String targetText = composeSearchText(target);
+        if (targetText.isBlank()) {
+            return List.of();
+        }
+
+        // Collect all visible candidates via a keyword-less search (bounded by maxCandidates),
+        // then rank them by semantic similarity. This reuses the same visibility/status SQL
+        // filters as regular search without the full-text predicate.
+        SearchResult visible = search(new SearchQuery(null, null, scope, "newest", 0, maxCandidates));
+        List<Long> candidateIds = visible.skillIds().stream()
+                .filter(id -> !id.equals(skillId))
+                .toList();
+        if (candidateIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<SkillSearchDocumentEntity> documents = searchDocumentRepository.findBySkillIdIn(candidateIds);
+        record Scored(Long skillId, double score) {}
+
+        return documents.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(doc -> {
+                    String vector = doc.getSemanticVector();
+                    if (vector == null || vector.isBlank()) {
+                        vector = searchEmbeddingService.embed(composeSearchText(doc));
+                    }
+                    return new Scored(doc.getSkillId(), searchEmbeddingService.similarity(targetText, vector));
+                })
+                .sorted(Comparator.comparingDouble(Scored::score).reversed())
+                .limit(limit)
+                .map(Scored::skillId)
+                .toList();
+    }
+
+    private String composeSearchText(SkillSearchDocumentEntity entity) {
+        return String.join("\n",
+                safe(entity.getTitle()),
+                safe(entity.getSummary()),
+                safe(entity.getKeywords()),
+                safe(entity.getSearchText()));
     }
 
     private List<Long> rerankBySemanticSimilarity(List<Long> candidateSkillIds,

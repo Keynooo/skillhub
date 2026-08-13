@@ -150,9 +150,13 @@ class CliSkillAppServiceTest {
     private void assertLimitOneSkipsUninstallableFirstMatch(
             Skill unavailableFirstMatch,
             List<SkillVersion> unavailableLatestVersions) {
-        SearchQueryService rankedSearch = query -> requiresInstallableLatest(query)
-                ? new SearchResult(List.of(2L), 1L, 0, 1)
-                : new SearchResult(List.of(1L), 2L, 0, 1);
+        SearchQueryService rankedSearch = org.mockito.Mockito.mock(SearchQueryService.class);
+        given(rankedSearch.search(any(SearchQuery.class))).willAnswer(invocation -> {
+            SearchQuery query = invocation.getArgument(0);
+            return requiresInstallableLatest(query)
+                    ? new SearchResult(List.of(2L), 1L, 0, 1)
+                    : new SearchResult(List.of(1L), 2L, 0, 1);
+        });
         SkillSearchAppService realSearchAppService = new SkillSearchAppService(
                 rankedSearch,
                 skillRepository,

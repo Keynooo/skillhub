@@ -101,6 +101,33 @@ public class SkillSearchAppService {
         return searchVisibleSkills(keyword, namespaceId, sortBy != null ? sortBy : "newest", page, size, List.of(), scope, true);
     }
 
+    /**
+     * Discovers skills similar to the given skill by ranking the visible
+     * candidate set by semantic-vector similarity (lexical-hash embedding),
+     * excluding the target itself.
+     */
+    public List<SkillSummaryResponse> similarSkills(
+            String namespaceSlug,
+            String slug,
+            int limit,
+            String userId,
+            Map<Long, NamespaceRole> userNsRoles) {
+        if (namespaceSlug == null || namespaceSlug.isBlank() || slug == null || slug.isBlank()) {
+            return List.of();
+        }
+        int effectiveLimit = Math.max(1, Math.min(limit, 20));
+
+        List<Skill> targets = skillRepository.findByNamespaceSlugAndSlug(namespaceSlug, slug);
+        if (targets.isEmpty()) {
+            return List.of();
+        }
+        Skill target = targets.get(0);
+
+        SearchVisibilityScope scope = buildVisibilityScope(userId, userNsRoles);
+        List<Long> similarIds = searchQueryService.findSimilarSkillIds(target.getId(), effectiveLimit, scope);
+        return mapVisibleSkillSummaries(similarIds);
+    }
+
     private Long resolveNamespaceId(String namespaceSlug, String userId, Map<Long, NamespaceRole> userNsRoles) {
         if (namespaceSlug == null || namespaceSlug.isBlank()) {
             return null;
