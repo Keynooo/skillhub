@@ -128,6 +128,10 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
         }
 
         ProcessBuilder pb = new ProcessBuilder(command);
+        // Run the CLI inside the throwaway workspace so that the prompt's
+        // "当前工作目录里的 SKILL.md" is resolvable, and any files the skill
+        // writes land in the workspace (cleaned up) rather than the server's cwd.
+        pb.directory(workspace.toFile());
         pb.redirectErrorStream(true);
         pb.redirectOutput(stdoutFile.toFile());
         return pb.start();
