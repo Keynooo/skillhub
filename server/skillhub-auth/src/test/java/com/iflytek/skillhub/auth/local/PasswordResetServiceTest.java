@@ -17,6 +17,7 @@ import com.iflytek.skillhub.domain.auth.PasswordResetRequestRepository;
 import com.iflytek.skillhub.domain.user.UserAccount;
 import com.iflytek.skillhub.domain.user.UserAccountRepository;
 import com.iflytek.skillhub.domain.user.UserStatus;
+import com.iflytek.skillhub.mail.ResendEmailSender;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -50,6 +51,9 @@ class PasswordResetServiceTest {
     @Mock
     private JavaMailSender mailSender;
 
+    @Mock
+    private ResendEmailSender resendEmailSender;
+
     private PasswordResetService service;
 
     @BeforeEach
@@ -65,7 +69,8 @@ class PasswordResetServiceTest {
                 new PasswordPolicyValidator(),
                 passwordEncoder,
                 mailSender,
-                properties
+                properties,
+                resendEmailSender
         );
     }
 

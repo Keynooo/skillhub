@@ -14,6 +14,7 @@ import com.iflytek.skillhub.domain.auth.AccountActivationRequest;
 import com.iflytek.skillhub.domain.auth.AccountActivationRequestRepository;
 import com.iflytek.skillhub.domain.user.UserAccount;
 import com.iflytek.skillhub.domain.user.UserAccountRepository;
+import com.iflytek.skillhub.mail.ResendEmailSender;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -43,6 +44,9 @@ class AccountActivationServiceTest {
     @Mock
     private JavaMailSender mailSender;
 
+    @Mock
+    private ResendEmailSender resendEmailSender;
+
     private AccountActivationService service;
 
     @BeforeEach
@@ -52,7 +56,8 @@ class AccountActivationServiceTest {
         properties.setEmailFromAddress("noreply@skillhub.local");
         properties.setEmailFromName("SkillHub");
         service = new AccountActivationService(
-                activationRequestRepository, userAccountRepository, passwordEncoder, mailSender, properties);
+                activationRequestRepository, userAccountRepository, passwordEncoder, mailSender, properties,
+                resendEmailSender);
     }
 
     @Test
