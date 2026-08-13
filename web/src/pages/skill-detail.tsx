@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate, useRouterState, useSearch } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowUpCircle, ChevronDown, ChevronUp, Clock, Folder, GitCompare, Globe, Lock, RefreshCw, ShieldCheck, Terminal, User, Users } from 'lucide-react'
+import { ArrowLeft, ArrowUpCircle, ChevronDown, ChevronUp, Clock, Folder, GitCompare, Globe, Lock, RefreshCw, ShieldCheck, Star, Terminal, User, Users } from 'lucide-react'
 import { MarkdownRenderer } from '@/features/skill/markdown-renderer'
 import { resolvePackageRelativeLink } from '@/features/skill/package-relative-link'
 import { FileTree } from '@/features/skill/file-tree'
@@ -46,6 +46,7 @@ import { toast } from '@/shared/lib/toast'
 import { cn } from '@/shared/lib/utils'
 import {
   useSkillDetail,
+  useSimilarSkills,
   useSkillVersions,
   useSkillVersionDetail,
   useSkillFiles,
@@ -156,6 +157,7 @@ export function SkillDetailPage() {
   const qslug = detailQueriesEnabled ? slug : ''
   const { data: skill, isLoading: isLoadingSkill, isFetching: isFetchingSkill, error: skillError } = useSkillDetail(qns, qslug, detailQueriesEnabled)
   const skillReady = detailQueriesEnabled && Boolean(skill) && !isLoadingSkill && !isFetchingSkill && !skillError
+  const { data: similarSkills } = useSimilarSkills(qns, qslug, skillReady)
   const { data: versions } = useSkillVersions(qns, qslug, skillReady)
   const headlineVersion = skill ? getHeadlineVersion(skill) : null
   const publishedVersion = skill ? getPublishedVersion(skill) : null
@@ -1225,6 +1227,53 @@ export function SkillDetailPage() {
           slug={slug}
           description={skill.summary}
         />
+
+        {similarSkills && similarSkills.length > 0 && (
+          <Card className="p-4 space-y-3">
+            <h3 className="text-sm font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
+              {t('skillDetail.similarSkills')}
+            </h3>
+            <div className="space-y-2">
+              {similarSkills.map((s) => (
+                <div
+                  key={s.id}
+                  className="rounded-lg border p-2.5 space-y-2"
+                  style={{ borderColor: 'hsl(var(--border))' }}
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate" style={{ color: 'hsl(var(--foreground))' }}>
+                      {s.displayName}
+                    </div>
+                    <div
+                      className="text-xs font-mono truncate flex items-center gap-1"
+                      style={{ color: 'hsl(var(--muted-foreground))' }}
+                    >
+                      <span className="truncate">{s.namespace}/{s.slug}</span>
+                      {s.starCount > 0 && (
+                        <span className="inline-flex items-center gap-0.5 shrink-0">
+                          <Star className="w-3 h-3" />
+                          {s.starCount}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => navigate({
+                      to: '/forkprobe',
+                      search: { preselect: `${namespace}/${slug},${s.namespace}/${s.slug}` },
+                    })}
+                  >
+                    <GitCompare className="w-3.5 h-3.5 mr-1" />
+                    {t('skillDetail.compare')}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
 
         <Button
           variant="outline"

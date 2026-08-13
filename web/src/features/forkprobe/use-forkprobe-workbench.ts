@@ -11,8 +11,8 @@ import type { RecommendedSkill } from './forkprobe-api'
 export type PanelState = 'IDLE' | 'RECOMMENDING' | 'SELECTING' | 'RUNNING' | 'COMPLETED'
 
 export interface UseForkprobeWorkbenchOptions {
-  /** Skill to preselect (from skill-detail page navigation). */
-  preselectedSkill?: PreselectedSkill | null
+  /** Skills to preselect (from skill-detail page navigation or similar-skills compare). */
+  preselectedSkills?: PreselectedSkill[]
 }
 
 export interface UseForkprobeWorkbenchReturn {
@@ -52,7 +52,7 @@ export interface UseForkprobeWorkbenchReturn {
 export function useForkprobeWorkbench(
   options: UseForkprobeWorkbenchOptions = {},
 ): UseForkprobeWorkbenchReturn {
-  const { preselectedSkill } = options
+  const { preselectedSkills = [] } = options
 
   const { data: config } = useForkprobeConfig()
 
@@ -82,18 +82,16 @@ export function useForkprobeWorkbench(
     [recommendQuery.data],
   )
 
-  // Merge preselected skill + manually searched skills into the combined list
+  // Merge preselected skills + manually searched skills into the combined list
   const allSkills = useMemo(() => {
     const merged = [...recommendations, ...manualSkills]
-    if (preselectedSkill) {
-      const alreadyPresent = merged.some(
-        (r) => r.coordinate === preselectedSkill.coordinate,
-      )
+    for (const ps of preselectedSkills) {
+      const alreadyPresent = merged.some((r) => r.coordinate === ps.coordinate)
       if (!alreadyPresent) {
         merged.push({
-          coordinate: preselectedSkill.coordinate,
-          name: preselectedSkill.name,
-          namespace: preselectedSkill.namespace,
+          coordinate: ps.coordinate,
+          name: ps.name,
+          namespace: ps.namespace,
           reasonZh: '当前浏览的技能',
           domain: 'selected',
           source: 'selected',
@@ -102,7 +100,7 @@ export function useForkprobeWorkbench(
       }
     }
     return merged
-  }, [recommendations, manualSkills, preselectedSkill])
+  }, [recommendations, manualSkills, preselectedSkills])
 
   // --- Side effects for automatic transitions ---
 
@@ -123,12 +121,14 @@ export function useForkprobeWorkbench(
     }
   }, [panelState, statusData])
 
-  // Preselection from skill detail page
+  // Preselection from skill detail page / similar-skills compare
   useEffect(() => {
-    if (preselectedSkill && panelState === 'IDLE') {
-      setSelectedSkills(new Set([preselectedSkill.coordinate]))
+    if (preselectedSkills.length > 0 && panelState === 'IDLE') {
+      setSelectedSkills(
+        new Set(preselectedSkills.map((ps) => ps.coordinate).slice(0, maxSelect)),
+      )
     }
-  }, [preselectedSkill, panelState])
+  }, [preselectedSkills, panelState, maxSelect])
 
   // --- Handlers ---
 

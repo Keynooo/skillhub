@@ -34,16 +34,21 @@ import type { RecommendedSkill } from '@/features/forkprobe/forkprobe-api'
 export function ForkprobeWorkbenchPage() {
   const { t } = useTranslation()
 
-  const preselectedSkill = useMemo(() => {
+  const preselectedSkills = useMemo(() => {
     const params = new URLSearchParams(window.location.search)
     const preselect = params.get('preselect')
-    if (preselect) {
-      const parts = preselect.split('/')
-      if (parts.length === 2) {
-        return { coordinate: preselect, name: parts[1], namespace: parts[0] }
-      }
-    }
-    return null
+    if (!preselect) return []
+    return preselect
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
+      .flatMap((entry) => {
+        const parts = entry.split('/')
+        if (parts.length === 2 && parts[0] && parts[1]) {
+          return [{ coordinate: entry, name: parts[1], namespace: parts[0] }]
+        }
+        return []
+      })
   }, [])
 
   const {
@@ -62,7 +67,7 @@ export function ForkprobeWorkbenchPage() {
     maxSelect,
     apiKeyOk,
     isStartingComparison,
-  } = useForkprobeWorkbench({ preselectedSkill })
+  } = useForkprobeWorkbench({ preselectedSkills })
 
   const [activeTabIdx, setActiveTabIdx] = useState(0)
   const [winnerCoord, setWinnerCoord] = useState<string | null>(null)

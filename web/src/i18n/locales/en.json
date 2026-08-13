@@ -832,6 +832,8 @@
     "noDocumentationDescription": "This skill version does not include a readable overview file.",
     "noDocumentationHint": "Many skills only ship executable files. You can continue with the file list and version details below.",
     "summaryLabel": "Summary",
+    "similarSkills": "Similar Skills",
+    "compare": "Compare",
     "noFiles": "No files",
     "noVersions": "No versions",
     "fileCount": "{{count}} files",

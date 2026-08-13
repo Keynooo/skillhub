@@ -43,7 +43,7 @@ export function ComparisonPanel() {
     maxSelect,
     apiKeyOk,
     isStartingComparison,
-  } = useForkprobeWorkbench({ preselectedSkill })
+  } = useForkprobeWorkbench({ preselectedSkills: preselectedSkill ? [preselectedSkill] : [] })
 
   // --- Derived ---
   const statusDataForState = statusData

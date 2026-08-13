@@ -16,6 +16,11 @@ async function getSkillDetail(namespace: string, slug: string): Promise<SkillDet
   return fetchJson<SkillDetail>(`${WEB_API_PREFIX}/skills/${cleanNamespace}/${encodeURIComponent(slug)}`)
 }
 
+async function getSimilarSkills(namespace: string, slug: string): Promise<SkillSummary[]> {
+  const cleanNamespace = namespace.startsWith('@') ? namespace.slice(1) : namespace
+  return fetchJson<SkillSummary[]>(`${WEB_API_PREFIX}/skills/${cleanNamespace}/${encodeURIComponent(slug)}/similar`)
+}
+
 async function getSkillVersions(namespace: string, slug: string): Promise<SkillVersion[]> {
   const cleanNamespace = namespace.startsWith('@') ? namespace.slice(1) : namespace
   const page = await fetchJson<PagedResponse<SkillVersion>>(`${WEB_API_PREFIX}/skills/${cleanNamespace}/${encodeURIComponent(slug)}/versions`)
@@ -73,6 +78,14 @@ export function useSkillDetail(namespace: string, slug: string, enabled = true) 
     queryFn: () => getSkillDetail(namespace, slug),
     enabled: enabled && !!namespace && !!slug,
     refetchOnMount: 'always',
+  })
+}
+
+export function useSimilarSkills(namespace: string, slug: string, enabled = true) {
+  return useQuery({
+    queryKey: ['skills', namespace, slug, 'similar'],
+    queryFn: () => getSimilarSkills(namespace, slug),
+    enabled: enabled && !!namespace && !!slug,
   })
 }
 
