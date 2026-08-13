@@ -214,7 +214,7 @@ export async function fetchJson<T>(input: RequestInfo | URL, init?: RequestWithT
     response = await fetch(withBaseUrl(input), {
       ...init,
       signal,
-      headers: withRequestHeaders(init?.headers),
+      headers: withCsrf(init?.headers),
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {

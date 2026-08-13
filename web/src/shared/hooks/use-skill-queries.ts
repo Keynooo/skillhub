@@ -59,11 +59,11 @@ async function publishSkill(params: { namespace: string; file: File; visibility:
   })
 }
 
-export function useSearchSkills(params: SearchParams) {
+export function useSearchSkills(params: SearchParams, enabled = true) {
   return useQuery({
     queryKey: ['skills', 'search', params],
     queryFn: () => searchSkills(params),
-    enabled: params.starredOnly !== true,
+    enabled: enabled && params.starredOnly !== true,
   })
 }
 

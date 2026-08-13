@@ -96,6 +96,18 @@ spring:
 skillhub:
   builtin-skills:
     enabled: ${SKILLHUB_BUILTIN_SKILLS_ENABLED:true}
+  anthropic:
+    api-key: ${ANTHROPIC_API_KEY:}
+    model: ${ANTHROPIC_MODEL:claude-haiku-4-5-20251001}
+    max-tokens: ${ANTHROPIC_MAX_TOKENS:4096}
+    base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
+    timeout-seconds: 120
+    max-retries: 2
+  forkprobe:
+    max-skills: 3
+    max-skills-cap: 5
+    comparison-ttl-minutes: 30
+    review-max-tokens: 1024
   redis:
     sentinel:
       check-sentinels-list: ${SKILLHUB_REDIS_SENTINEL_CHECK_SENTINELS_LIST:true}
@@ -108,7 +120,7 @@ skillhub:
       enabled: ${SKILLHUB_AUTH_SESSION_BOOTSTRAP_ENABLED:false}
     password-reset:
       code-expiry: ${SKILLHUB_AUTH_PASSWORD_RESET_CODE_EXPIRY:PT10M}
-      email-from-address: ${SKILLHUB_AUTH_PASSWORD_RESET_FROM_ADDRESS:noreply@skillhub.local}
+      email-from-address: ${SKILLHUB_AUTH_PASSWORD_RESET_FROM_ADDRESS:cheng_hu8765@hotmail.com}
       email-from-name: ${SKILLHUB_AUTH_PASSWORD_RESET_FROM_NAME:SkillHub}
   public:
     base-url: ${SKILLHUB_PUBLIC_BASE_URL:}

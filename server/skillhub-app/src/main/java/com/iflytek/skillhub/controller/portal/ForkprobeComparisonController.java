@@ -1,0 +1,89 @@
+package com.iflytek.skillhub.controller.portal;
+
+import com.iflytek.skillhub.controller.BaseApiController;
+import com.iflytek.skillhub.dto.ApiResponse;
+import com.iflytek.skillhub.dto.ApiResponseFactory;
+import com.iflytek.skillhub.dto.forkprobe.CompareRequest;
+import com.iflytek.skillhub.dto.forkprobe.CompareResponse;
+import com.iflytek.skillhub.dto.forkprobe.ComparisonStatusResponse;
+import com.iflytek.skillhub.dto.forkprobe.RecommendRequest;
+import com.iflytek.skillhub.dto.forkprobe.RecommendResponse;
+import com.iflytek.skillhub.dto.forkprobe.RecommendedSkill;
+import com.iflytek.skillhub.ratelimit.RateLimit;
+import com.iflytek.skillhub.service.forkprobe.ForkprobeComparisonService;
+import jakarta.validation.Valid;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+/**
+ * REST endpoints for the forkprobe skill comparison sandbox.
+ * <p>
+ * Provides skill recommendation, comparison execution, and status polling.
+ * All comparison state is in-memory — restarting the server clears inflight runs.
+ */
+@RestController
+@RequestMapping({"/api/web/forkprobe"})
+public class ForkprobeComparisonController extends BaseApiController {
+
+    private final ForkprobeComparisonService comparisonService;
+
+    public ForkprobeComparisonController(
+            ForkprobeComparisonService comparisonService,
+            ApiResponseFactory responseFactory) {
+        super(responseFactory);
+        this.comparisonService = comparisonService;
+    }
+
+    /**
+     * Get recommended skills for a task description.
+     */
+    @PostMapping("/recommend")
+    @RateLimit(category = "forkprobe-recommend", authenticated = 30, anonymous = 10, windowSeconds = 60)
+    public ApiResponse<RecommendResponse> recommend(@RequestBody @Valid RecommendRequest request) {
+        List<RecommendedSkill> candidates = comparisonService.recommend(
+                request.taskDescription(),
+                request.maxCandidates());
+        return ok("response.success.read", new RecommendResponse(candidates));
+    }
+
+    /**
+     * Start a new skill comparison run.
+     */
+    @PostMapping("/compare")
+    @RateLimit(category = "forkprobe-compare", authenticated = 10, anonymous = 3, windowSeconds = 60)
+    public ApiResponse<CompareResponse> compare(@RequestBody @Valid CompareRequest request) {
+        CompareResponse response = comparisonService.startComparison(
+                request.taskDescription(),
+                request.skillCoordinates());
+        return ok("response.success.create", response);
+    }
+
+    /**
+     * Poll for comparison status and results.
+     * <p>
+     * Frontend polls every 2 seconds while status is PENDING or RUNNING.
+     * Returns 404 if the comparison ID doesn't exist (expired or never created).
+     */
+    @GetMapping("/compare/{comparisonId}")
+    public ResponseEntity<ApiResponse<ComparisonStatusResponse>> status(
+            @PathVariable String comparisonId) {
+        Optional<ComparisonStatusResponse> status = comparisonService.getStatus(comparisonId);
+        if (status.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(ok("response.success.read", status.get()));
+    }
+
+    /**
+     * Get forkprobe configuration for the frontend.
+     */
+    @GetMapping("/config")
+    public ApiResponse<Map<String, Object>> config() {
+        Map<String, Object> config = comparisonService.getConfig();
+        return ok("response.success.read", config);
+    }
+}

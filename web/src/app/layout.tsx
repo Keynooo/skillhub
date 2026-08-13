@@ -5,6 +5,8 @@ import { useAuth } from '@/features/auth/use-auth'
 import { LanguageSwitcher } from '@/shared/components/language-switcher'
 import { UserMenu } from '@/shared/components/user-menu'
 import { NotificationBell } from '@/features/notification/notification-bell'
+import { ComparisonPanelProvider } from '@/features/forkprobe/comparison-panel-context'
+import { ComparisonPanel } from '@/features/forkprobe/comparison-panel'
 import { getAppHeaderClassName } from './layout-header-style'
 import { getAppMainContentLayout, resolveAppMainContentPathname } from './layout-main-content'
 
@@ -50,6 +52,7 @@ export function Layout() {
     { label: t('nav.publish'), to: '/dashboard/publish', auth: true },
     { label: t('nav.search'), to: '/search' },
     { label: t('nav.dashboard'), to: '/dashboard', auth: true },
+    { label: t('nav.forkprobe'), to: '/forkprobe', auth: true },
     { label: t('nav.mySkills'), to: '/dashboard/skills', auth: true },
   ]
 
@@ -60,6 +63,7 @@ export function Layout() {
   }
 
   return (
+    <ComparisonPanelProvider>
     <div className="min-h-screen flex flex-col relative overflow-x-clip" style={{ background: 'var(--bg-page, hsl(var(--background)))' }}>
       {/* Decorative gradient orb */}
       <div
@@ -131,6 +135,9 @@ export function Layout() {
         </Suspense>
       </main>
 
+      {/* Forkprobe comparison panel (slide-out overlay) */}
+      <ComparisonPanel />
+
       {/* Footer */}
       <footer className="relative z-10 border-t rounded-t-2xl mt-auto" style={{ background: '#F1F5F9', borderColor: 'hsl(var(--border))' }}>
         <div className="max-w-6xl mx-auto px-6 md:px-12 py-6">
@@ -180,5 +187,6 @@ export function Layout() {
         </div>
       </footer>
     </div>
+    </ComparisonPanelProvider>
   )
 }

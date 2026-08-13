@@ -117,6 +117,10 @@ const MyStarsPage = createLazyRouteComponent(() => import('@/pages/dashboard/sta
 const MySubscriptionsPage = createLazyRouteComponent(() => import('@/pages/dashboard/subscriptions'), 'MySubscriptionsPage')
 const NotificationsPage = createLazyRouteComponent(() => import('@/pages/notifications'), 'NotificationsPage')
 const TokensPage = createLazyRouteComponent(() => import('@/pages/dashboard/tokens'), 'TokensPage')
+const ForkprobeWorkbenchPage = createLazyRouteComponent(
+  () => import('@/pages/forkprobe-workbench'),
+  'ForkprobeWorkbenchPage',
+)
 const CliAuthPage = createLazyRouteComponent(() => import('@/pages/cli-auth'), 'CliAuthPage')
 const SecuritySettingsPage = createLazyRouteComponent(
   () => import('@/pages/settings/security'),
@@ -392,6 +396,16 @@ const cliAuthRoute = createRoute({
   },
 })
 
+const forkprobeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'forkprobe',
+  beforeLoad: requireAuth,
+  validateSearch: (search: Record<string, unknown>): { preselect?: string } => ({
+    preselect: typeof search.preselect === 'string' && search.preselect ? search.preselect : undefined,
+  }),
+  component: ForkprobeWorkbenchPage,
+})
+
 const settingsSecurityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'settings/security',
@@ -472,6 +486,7 @@ const routeTree = rootRoute.addChildren([
   dashboardNotificationsRoute,
   dashboardTokensRoute,
   cliAuthRoute,
+  forkprobeRoute,
   settingsSecurityRoute,
   settingsProfileRoute,
   settingsNotificationsRoute,

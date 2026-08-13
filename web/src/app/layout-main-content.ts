@@ -31,6 +31,13 @@ export function getAppMainContentLayout(pathname: string): AppMainContentLayout 
     }
   }
 
+  if (pathname === '/forkprobe') {
+    return {
+      mainClassName: CENTERED_MAIN_CLASS_NAME,
+      contentClassName: CENTERED_DASHBOARD_CONTENT_CLASS_NAME,
+    }
+  }
+
   if (pathname === '/dashboard' || pathname.startsWith('/dashboard/')) {
     return {
       mainClassName: CENTERED_MAIN_CLASS_NAME,

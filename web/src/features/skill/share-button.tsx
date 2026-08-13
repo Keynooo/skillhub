@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Share2, Check } from 'lucide-react'
 import { useCopyToClipboard } from '@/shared/lib/clipboard'
+import { Button } from '@/shared/ui/button'
 import { getBaseUrl } from './install-command'
 
 interface ShareButtonProps {
@@ -41,18 +42,15 @@ export function ShareButton({ namespace, slug, description }: ShareButtonProps) 
   }
 
   return (
-    <button
-      type="button"
+    <Button
+      className="w-full"
+      variant="outline"
+      size="lg"
       data-testid="share-skill-button"
       onClick={handleShare}
-      className="relative w-full overflow-hidden rounded-xl border border-border/60 bg-muted/50 px-4 py-3 transition-colors hover:bg-muted/70 active:bg-muted/80"
     >
-      <div className="flex items-center justify-center gap-2">
-        {copied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
-        <span className="text-[13px] leading-relaxed text-foreground sm:text-sm">
-          {copied ? t('skillDetail.share.copied') : t('skillDetail.share.button')}
-        </span>
-      </div>
-    </button>
+      {copied ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+      {copied ? t('skillDetail.share.copied') : t('skillDetail.share.button')}
+    </Button>
   )
 }

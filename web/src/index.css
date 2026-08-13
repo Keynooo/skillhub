@@ -480,3 +480,64 @@
 .hero-input::placeholder {
   color: hsl(var(--text-placeholder));
 }
+
+/* ─── Forkprobe comparison panel animations ─── */
+@keyframes forkprobe-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes forkprobe-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-panel-slide-in {
+  animation: forkprobe-slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ─── Forkprobe full-screen workbench ─── */
+.fp-grid {
+  display: grid;
+  grid-template-columns: 300px 1fr 280px;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.fp-left {
+  min-width: 0;
+}
+
+.fp-center {
+  min-width: 0;
+}
+
+.fp-right {
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .fp-grid {
+    grid-template-columns: 1fr 1.5fr;
+  }
+
+  .fp-right {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 768px) {
+  .fp-grid {
+    grid-template-columns: 1fr;
+  }
+}
