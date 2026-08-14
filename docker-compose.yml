@@ -3,6 +3,7 @@ services:
     build: ./scanner
     ports:
       - "8000:8000"
+      - "18000:8000"
     environment:
       SKILL_SCANNER_LLM_API_KEY: ${SKILL_SCANNER_LLM_API_KEY:-}
       SKILL_SCANNER_LLM_BASE_URL: ${SKILL_SCANNER_LLM_BASE_URL:-}

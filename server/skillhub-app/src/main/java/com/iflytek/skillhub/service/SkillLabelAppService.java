@@ -77,6 +77,46 @@ public class SkillLabelAppService {
         return toDtos(skillLabelService.listSkillLabels(skillId));
     }
 
+    /**
+     * Bulk-fetch labels for a set of skills, grouped by skill id.
+     * Used to enrich list/search summary responses without N+1 queries.
+     */
+    public Map<Long, List<SkillLabelDto>> listSkillLabelsBySkillIds(List<Long> skillIds) {
+        if (skillIds == null || skillIds.isEmpty()) {
+            return Map.of();
+        }
+        List<SkillLabel> skillLabels = skillLabelService.listSkillLabelsBySkillIds(skillIds);
+        if (skillLabels.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> labelIds = skillLabels.stream()
+                .map(SkillLabel::getLabelId)
+                .distinct()
+                .toList();
+        Map<Long, LabelDefinition> definitionsById = labelDefinitionService.listByIds(labelIds).stream()
+                .collect(Collectors.toMap(LabelDefinition::getId, Function.identity()));
+        Map<Long, List<LabelTranslation>> translationsByLabelId = labelDefinitionService.listTranslationsByLabelIds(labelIds);
+
+        Map<Long, List<SkillLabelDto>> result = new java.util.HashMap<>();
+        for (SkillLabel skillLabel : skillLabels) {
+            if (!definitionsById.containsKey(skillLabel.getLabelId())) {
+                continue;
+            }
+            LabelDefinition definition = definitionsById.get(skillLabel.getLabelId());
+            SkillLabelDto dto = new SkillLabelDto(
+                    definition.getSlug(),
+                    definition.getType().name(),
+                    labelLocalizationService.resolveDisplayName(
+                            definition.getSlug(),
+                            translationsByLabelId.getOrDefault(definition.getId(), List.of()))
+            );
+            result.computeIfAbsent(skillLabel.getSkillId(), key -> new java.util.ArrayList<>()).add(dto);
+        }
+        result.values().forEach(labels -> labels.sort(
+                java.util.Comparator.comparing(SkillLabelDto::type).thenComparing(SkillLabelDto::slug)));
+        return result;
+    }
+
     @Transactional
     public SkillLabelDto attachLabel(String namespaceSlug,
                                      String skillSlug,

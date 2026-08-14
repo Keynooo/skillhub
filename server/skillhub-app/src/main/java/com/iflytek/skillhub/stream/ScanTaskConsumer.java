@@ -142,10 +142,16 @@ public class ScanTaskConsumer extends AbstractStreamConsumer<ScanTaskConsumer.Sc
                 error);
         try {
             skillVersionRepository.findById(payload.versionId())
-                    .filter(version -> version.getStatus() == SkillVersionStatus.SCANNING)
                     .ifPresent(version -> {
-                        version.setStatus(SkillVersionStatus.SCAN_FAILED);
-                        skillVersionRepository.save(version);
+                        if (version.getStatus() == SkillVersionStatus.SCANNING) {
+                            version.setStatus(SkillVersionStatus.SCAN_FAILED);
+                            skillVersionRepository.save(version);
+                        } else {
+                            // Version is already published (or in another terminal state): its
+                            // in-progress placeholder audit is now orphaned and would render as
+                            // "scanning" forever, so discard it.
+                            securityScanService.discardFailedPlaceholder(payload.versionId(), payload.scannerType());
+                        }
                     });
         } finally {
             cleanupTempPath(payload.cleanupPath());

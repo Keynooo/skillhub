@@ -20,6 +20,7 @@ import { cn } from '@/shared/lib/utils'
 import { resolveReviewActionErrorDescription } from '@/features/review/review-error'
 import { ReviewSkillDetailSection } from '@/features/review/review-skill-detail-section'
 import { SecurityAuditSection } from '@/features/security-audit/security-audit-section'
+import { useSecurityAudits } from '@/features/security-audit/use-security-audit'
 import { FileTree } from '@/features/skill/file-tree'
 import { FilePreviewDialog } from '@/features/skill/file-preview-dialog'
 import type { FileTreeNode } from '@/features/skill/file-tree-builder'
@@ -135,6 +136,12 @@ function ReviewDetailScreen({
     rejectMutation.mutate({ taskId, comment })
   }
 
+  const reviewSkillId = reviewSkillDetail?.skill?.id
+  const reviewVersionId =
+    reviewSkillDetail?.versions?.find((version) => version.version === review?.version)?.id ??
+    review?.skillVersionId
+  const { data: securityAudits } = useSecurityAudits(reviewSkillId, reviewVersionId)
+
   if (isLoading) {
     return (
       <div className="space-y-6 max-w-3xl animate-fade-up">
@@ -178,6 +185,31 @@ function ReviewDetailScreen({
     (version) => version.version === reviewSkillDetail.activeVersion
   )
   const isApprovalBlockedByScanning = activeReviewVersion?.status === 'SCANNING'
+
+  const handleAttachAuditResult = () => {
+    if (!securityAudits || securityAudits.length === 0) {
+      toast.info(t('review.noAuditResult'))
+      return
+    }
+    const text = securityAudits
+      .map((audit) => {
+        const lines = [`${t('securityAudit.title')}: ${t(`securityAudit.verdict.${audit.verdict}`)}`]
+        if (audit.findingsCount > 0) {
+          lines.push(t('securityAudit.findingsCount', { count: audit.findingsCount }))
+          for (const finding of audit.findings) {
+            const severity = t(`securityAudit.severity.${finding.severity}`)
+            const location = finding.filePath
+              ? `${finding.filePath}${finding.lineNumber ? `:${finding.lineNumber}` : ''}`
+              : ''
+            const detail = [finding.title, location].filter(Boolean).join(' @ ')
+            lines.push(`- [${severity}] ${detail}`)
+          }
+        }
+        return lines.join('\n')
+      })
+      .join('\n\n')
+    setComment((prev) => (prev.trim() ? `${prev.trimEnd()}\n\n${text}` : text))
+  }
 
   return (
     <div className="max-w-6xl mx-auto flex flex-col lg:flex-row gap-8 animate-fade-up">
@@ -266,6 +298,15 @@ function ReviewDetailScreen({
               onChange={(e) => setComment(e.target.value)}
               rows={4}
             />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleAttachAuditResult}
+              disabled={!securityAudits || securityAudits.length === 0}
+            >
+              {t('review.attachAuditResult')}
+            </Button>
           </div>
 
           <div className="flex gap-3">
@@ -324,15 +365,9 @@ function ReviewDetailScreen({
         </Card>
       )}
 
-      {(() => {
-        const skillId = reviewSkillDetail?.skill?.id
-        const versionId =
-          reviewSkillDetail?.versions?.find((v) => v.version === review.version)?.id ??
-          review.skillVersionId
-        return skillId && versionId ? (
-          <SecurityAuditSection skillId={skillId} versionId={versionId} versionStatus={activeReviewVersion?.status} />
-        ) : null
-      })()}
+      {reviewSkillId && reviewVersionId ? (
+        <SecurityAuditSection skillId={reviewSkillId} versionId={reviewVersionId} versionStatus={activeReviewVersion?.status} />
+      ) : null}
 
       <ReviewSkillDetailSection
         detail={reviewSkillDetail}

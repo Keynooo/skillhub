@@ -20,11 +20,13 @@ class ComparisonRun {
         PENDING,
         RUNNING,
         COMPLETED,
-        FAILED
+        FAILED,
+        CANCELLED
     }
 
     private final String comparisonId;
     private volatile Status status;
+    private volatile boolean cancelled;
     private final String taskDescription;
     private final List<SkillSpec> skills;
     private final Map<String, ComparisonResult> results;
@@ -52,12 +54,28 @@ class ComparisonRun {
     }
 
     void setStatus(Status status) {
+        // If a cancel landed while skills were finishing, a COMPLETED must not
+        // clobber the user-requested cancellation.
+        if (this.cancelled && status == Status.COMPLETED) {
+            status = Status.CANCELLED;
+        }
         this.status = status;
         if (status == Status.RUNNING && this.startedAt == null) {
             this.startedAt = Instant.now();
         }
-        if (status == Status.COMPLETED || status == Status.FAILED) {
+        if (status == Status.COMPLETED || status == Status.FAILED || status == Status.CANCELLED) {
             this.completedAt = Instant.now();
+        }
+    }
+
+    boolean isCancelled() {
+        return cancelled;
+    }
+
+    void cancel() {
+        this.cancelled = true;
+        if (this.status == Status.PENDING || this.status == Status.RUNNING) {
+            setStatus(Status.CANCELLED);
         }
     }
 
@@ -112,6 +130,7 @@ class ComparisonRun {
             String coordinate,   // "namespace/slug" or "baseline"
             String name,
             String namespace,
-            String systemPrompt   // SKILL.md body content or baseline prompt
+            String systemPrompt,  // SKILL.md body content or baseline prompt
+            String sourceUrl      // GitHub source for catalog skills; null for SkillHub/baseline
     ) {}
 }

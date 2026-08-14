@@ -12,6 +12,8 @@ import com.iflytek.skillhub.domain.namespace.SlugValidator;
 import com.iflytek.skillhub.domain.review.ReviewTaskStatus;
 import com.iflytek.skillhub.domain.review.ReviewTask;
 import com.iflytek.skillhub.domain.review.ReviewTaskRepository;
+import com.iflytek.skillhub.domain.label.LabelTask;
+import com.iflytek.skillhub.domain.label.LabelTaskProducer;
 import com.iflytek.skillhub.domain.security.SecurityScanService;
 import com.iflytek.skillhub.domain.shared.exception.DomainBadRequestException;
 import com.iflytek.skillhub.domain.shared.exception.DomainForbiddenException;
@@ -26,6 +28,7 @@ import com.iflytek.skillhub.storage.ObjectStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.Yaml;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,6 +51,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -69,6 +73,7 @@ public class SkillPublishService {
             SkillVersionStatus.REJECTED
     );
     private static final Logger log = LoggerFactory.getLogger(SkillPublishService.class);
+    private static final int MAX_LABEL_BODY_CHARS = 3000;
 
     public record PublishResult(
             Long skillId,
@@ -91,6 +96,8 @@ public class SkillPublishService {
     private final SkillStorageDeletionCompensationService compensationService;
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
+    private final LabelTaskProducer labelTaskProducer;
+    private final boolean autoTaggingEnabled;
 
     public SkillPublishService(
             NamespaceRepository namespaceRepository,
@@ -107,7 +114,9 @@ public class SkillPublishService {
             SecurityScanService securityScanService,
             SkillStorageDeletionCompensationService compensationService,
             ApplicationEventPublisher eventPublisher,
-            Clock clock) {
+            Clock clock,
+            LabelTaskProducer labelTaskProducer,
+            @Value("${skillhub.label.auto-tagging.enabled:false}") boolean autoTaggingEnabled) {
         this.namespaceRepository = namespaceRepository;
         this.namespaceMemberRepository = namespaceMemberRepository;
         this.skillRepository = skillRepository;
@@ -123,6 +132,8 @@ public class SkillPublishService {
         this.compensationService = compensationService;
         this.eventPublisher = eventPublisher;
         this.clock = clock;
+        this.labelTaskProducer = labelTaskProducer;
+        this.autoTaggingEnabled = autoTaggingEnabled;
     }
 
     public record DryRunResult(
@@ -552,6 +563,21 @@ public class SkillPublishService {
             securityScanService.triggerScan(version.getId(), entries, publisherId);
         }
 
+        // Trigger LLM auto-tagging for all versions (including auto-publish). The labeling task
+        // runs asynchronously; a failure there never blocks this publish.
+        if (autoTaggingEnabled) {
+            labelTaskProducer.publishLabelTask(new LabelTask(
+                    UUID.randomUUID().toString(),
+                    skill.getId(),
+                    metadata.name(),
+                    metadata.description(),
+                    truncateForLabeling(metadata.body()),
+                    publisherId,
+                    System.currentTimeMillis(),
+                    Map.of()
+            ));
+        }
+
         // 12. Update skill metadata and move the published pointer for auto-publish flows
         skill.setDisplayName(metadata.name());
         skill.setSummary(metadata.description());
@@ -569,6 +595,14 @@ public class SkillPublishService {
 
         // 13. Return identifiers for the created version
         return new PublishResult(skill.getId(), skill.getSlug(), version);
+    }
+
+    private static String truncateForLabeling(String body) {
+        if (body == null || body.length() <= MAX_LABEL_BODY_CHARS) {
+            return body;
+        }
+        int half = MAX_LABEL_BODY_CHARS / 2;
+        return body.substring(0, half) + "\n...(truncated)...\n" + body.substring(body.length() - half);
     }
 
     private void deleteReplaceableVersionArtifacts(Skill skill, SkillVersion version, String namespaceSlug) {

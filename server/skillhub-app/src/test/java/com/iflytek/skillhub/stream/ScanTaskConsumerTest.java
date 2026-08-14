@@ -119,6 +119,40 @@ class ScanTaskConsumerTest {
     }
 
     @Test
+    void markFailed_forPublishedVersion_discardsOrphanedPlaceholderAndKeepsStatus() throws Exception {
+        SkillVersion version = new SkillVersion(8L, "1.0.0", "publisher-1");
+        setField(version, "id", 42L);
+        version.setStatus(SkillVersionStatus.PUBLISHED);
+
+        InMemorySkillVersionRepository skillVersionRepository = new InMemorySkillVersionRepository(version);
+        StubSecurityScanService securityScanService = new StubSecurityScanService();
+        TestableScanTaskConsumer consumer = new TestableScanTaskConsumer(
+                new StubSecurityScanner(),
+                securityScanService,
+                skillVersionRepository,
+                new InMemoryScanTaskProducer(),
+                new InMemoryObjectStorageService()
+        );
+        Files.createDirectories(SCAN_TEMP_DIR);
+        Path tempFile = Files.createTempFile(SCAN_TEMP_DIR, "scan-task-consumer-published-failure", ".zip");
+        ScanTaskConsumer.ScanTaskPayload payload = new ScanTaskConsumer.ScanTaskPayload(
+                "task-published",
+                42L,
+                tempFile.toString(),
+                null,
+                ScannerType.SKILL_SCANNER
+        );
+
+        consumer.invokeMarkFailed(payload, "scan failed");
+
+        assertThat(skillVersionRepository.savedVersion).isNull();
+        assertThat(version.getStatus()).isEqualTo(SkillVersionStatus.PUBLISHED);
+        assertThat(securityScanService.discardedPlaceholderVersionId).isEqualTo(42L);
+        assertThat(securityScanService.discardedPlaceholderScannerType).isEqualTo(ScannerType.SKILL_SCANNER);
+        assertThat(Files.exists(tempFile)).isFalse();
+    }
+
+    @Test
     void retryMessage_republishesTaskWithRetryCount() {
         InMemoryScanTaskProducer producer = new InMemoryScanTaskProducer();
         TestableScanTaskConsumer consumer = new TestableScanTaskConsumer(
@@ -359,6 +393,8 @@ class ScanTaskConsumerTest {
         private Long lastVersionId;
         private ScannerType lastScannerType;
         private SecurityScanResponse lastResponse;
+        private Long discardedPlaceholderVersionId;
+        private ScannerType discardedPlaceholderScannerType;
 
         private StubSecurityScanService() {
             super(null, null, task -> {
@@ -370,6 +406,12 @@ class ScanTaskConsumerTest {
             this.lastVersionId = versionId;
             this.lastScannerType = scannerType;
             this.lastResponse = response;
+        }
+
+        @Override
+        public void discardFailedPlaceholder(Long versionId, ScannerType scannerType) {
+            this.discardedPlaceholderVersionId = versionId;
+            this.discardedPlaceholderScannerType = scannerType;
         }
     }
 

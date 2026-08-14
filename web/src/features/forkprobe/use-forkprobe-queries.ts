@@ -3,6 +3,7 @@ import {
   recommendSkills,
   startComparison,
   getComparisonStatus,
+  cancelComparison,
   getForkprobeConfig,
   type ComparisonStatusResponse,
   type CompareResponse,
@@ -62,7 +63,7 @@ export function useStartComparison() {
 }
 
 /**
- * Poll comparison status until COMPLETED or FAILED.
+ * Poll comparison status until a terminal state (COMPLETED / FAILED / CANCELLED).
  * Pass `null` for comparisonId when no comparison is running.
  */
 export function useForkprobeComparisonStatus(comparisonId: string | null) {
@@ -72,10 +73,28 @@ export function useForkprobeComparisonStatus(comparisonId: string | null) {
     enabled: !!comparisonId,
     refetchInterval: (query) => {
       const data = query.state.data
-      if (data?.status === 'COMPLETED' || data?.status === 'FAILED') {
+      if (
+        data?.status === 'COMPLETED' ||
+        data?.status === 'FAILED' ||
+        data?.status === 'CANCELLED'
+      ) {
         return false
       }
       return 2000 // poll every 2 seconds
+    },
+  })
+}
+
+/**
+ * Cancel an in-flight comparison run.
+ */
+export function useCancelComparison() {
+  const queryClient = useQueryClient()
+
+  return useMutation<ComparisonStatusResponse, Error, string>({
+    mutationFn: (comparisonId) => cancelComparison(comparisonId),
+    onSuccess: (data) => {
+      queryClient.setQueryData(forkprobeKeys.comparison(data.comparisonId), data)
     },
   })
 }

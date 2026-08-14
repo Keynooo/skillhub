@@ -6,13 +6,13 @@ import {
   RefreshCw,
   AlertCircle,
   CheckCircle2,
-  Copy,
-  Check,
   Loader2,
   ChevronRight,
-  Trophy,
   Hash,
+  ExternalLink,
+  Square,
 } from 'lucide-react'
+import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/textarea'
 import { cn } from '@/shared/lib/utils'
@@ -20,6 +20,7 @@ import { useForkprobeWorkbench } from '@/features/forkprobe/use-forkprobe-workbe
 import { SkillSearchBox } from '@/features/forkprobe/skill-search-box'
 import type { CandidateResult } from '@/features/forkprobe/forkprobe-api'
 import type { RecommendedSkill } from '@/features/forkprobe/forkprobe-api'
+import { resolveSkillLink } from '@/features/forkprobe/forkprobe-api'
 
 /**
  * Full-screen forkprobe comparison workbench — styled to match the
@@ -29,7 +30,7 @@ import type { RecommendedSkill } from '@/features/forkprobe/forkprobe-api'
  *   Top bar: report title + stats + step indicator
  *   Left:    task summary + candidate skill tab buttons
  *   Center:  selected skill output with metadata
- *   Right:   winner selection + continuation handoff
+ *   Right:   winner selection + follow-up action (detail page / source)
  */
 export function ForkprobeWorkbenchPage() {
   const { t } = useTranslation()
@@ -61,17 +62,19 @@ export function ForkprobeWorkbenchPage() {
     handleAddSkill,
     handleGetRecommendations,
     handleStartComparison,
+    handleCancelComparison,
     handleReset,
     allSkills,
     statusData,
     maxSelect,
     apiKeyOk,
     isStartingComparison,
+    isCancellingComparison,
   } = useForkprobeWorkbench({ preselectedSkills })
 
+  const navigate = useNavigate()
+
   const [activeTabIdx, setActiveTabIdx] = useState(0)
-  const [winnerCoord, setWinnerCoord] = useState<string | null>(null)
-  const [handoffCopied, setHandoffCopied] = useState(false)
 
   // Derived
   const taskLen = taskDescription.trim().length
@@ -94,32 +97,8 @@ export function ForkprobeWorkbenchPage() {
   const totalTokens = allResults.reduce((s, r) => s + (r.tokensUsed || 0), 0)
   const totalLatency = allResults.reduce((s, r) => s + (r.latencySeconds || 0), 0)
 
-  const winnerResult = winnerCoord
-    ? allResults.find((r) => r.skillCoordinate === winnerCoord) ?? null
-    : null
-
-  // Independent AI review verdict from the backend judge — deliberately distinct
-  // from the user's own winner selection above.
-  const review = statusData?.review ?? null
-  const reviewWinner = review?.winnerCoordinate
-    ? allResults.find((r) => r.skillCoordinate === review.winnerCoordinate) ?? null
-    : null
-  const reviewWinnerEntry = review?.scores.find(
-    (s) => s.coordinate === review.winnerCoordinate,
-  )
-  const reviewWinnerScores = reviewWinnerEntry?.dimensions ?? []
-  const reviewWinnerOverall = reviewWinnerEntry?.overall ?? null
-
-  const handoffText = winnerResult
-    ? `继续使用 **${winnerResult.skillName}** 完成以下任务：\n\n${taskDescription}`
-    : ''
-
-  const copyHandoff = async () => {
-    if (!handoffText) return
-    await navigator.clipboard.writeText(handoffText)
-    setHandoffCopied(true)
-    setTimeout(() => setHandoffCopied(false), 2000)
-  }
+  // Direct follow-up action for the currently viewed candidate — no winner-selection step.
+  const activeLink = activeResult ? resolveSkillLink(activeResult) : null
 
   // --- Helper: skill tab buttons (left sidebar) ---
   const SkillTabs = ({
@@ -258,7 +237,7 @@ export function ForkprobeWorkbenchPage() {
       )}
 
       {/* ─── THREE-COLUMN BODY ─── */}
-      <div className="fp-grid">
+      <div className={cn('fp-grid', isCompleted && 'pt-24')}>
         {/* ===== LEFT ===== */}
         <aside className="fp-left">
           {/* IDLE / SELECTING: task input */}
@@ -510,11 +489,11 @@ export function ForkprobeWorkbenchPage() {
         <main className="fp-center">
           {/* IDLE / RECOMMENDING: empty */}
           {(isIdle || isRecommending) && (
-            <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center space-y-3">
+            <div className="flex flex-col items-center justify-center h-full min-h-[420px] text-center space-y-3 pt-24">
               <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
                 <Hash className="w-8 h-8 text-muted-foreground/40" />
               </div>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground leading-relaxed">
                 输入任务并获取推荐后，<br />
                 每个技能的输出将在这里展示。
               </p>
@@ -523,11 +502,11 @@ export function ForkprobeWorkbenchPage() {
 
           {/* SELECTING: hint */}
           {isSelecting && (
-            <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center space-y-3">
+            <div className="flex flex-col items-center justify-center h-full min-h-[420px] text-center space-y-3 pt-24">
               <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
                 <GitCompare className="w-8 h-8 text-muted-foreground/40" />
               </div>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground leading-relaxed">
                 选择要对比的技能后，<br />
                 点击"开始对比"启动试跑。
               </p>
@@ -536,7 +515,7 @@ export function ForkprobeWorkbenchPage() {
 
           {/* RUNNING: progress */}
           {isRunning && (
-            <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center space-y-4">
+            <div className="flex flex-col items-center justify-center h-full min-h-[420px] text-center space-y-4 pt-24">
               <div className="relative w-16 h-16">
                 <Loader2 className="w-16 h-16 text-primary/30 animate-spin absolute inset-0" />
                 <span className="absolute inset-0 flex items-center justify-center text-lg font-bold text-primary">
@@ -544,6 +523,19 @@ export function ForkprobeWorkbenchPage() {
                 </span>
               </div>
               <p className="text-sm text-muted-foreground">试跑中...</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCancelComparison}
+                disabled={isCancellingComparison}
+              >
+                {isCancellingComparison ? (
+                  <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Square className="w-3.5 h-3.5 mr-1" />
+                )}
+                取消
+              </Button>
             </div>
           )}
 
@@ -556,21 +548,27 @@ export function ForkprobeWorkbenchPage() {
                   <h3 className="text-lg font-bold" style={{ color: 'hsl(var(--foreground))' }}>
                     {activeResult.skillName}
                   </h3>
-                  {activeResult.output && (
+                  {activeResult.output && activeLink?.kind === 'detail' && (
                     <Button
                       size="sm"
-                      variant={winnerCoord === activeResult.skillCoordinate ? 'default' : 'outline'}
-                      onClick={() => setWinnerCoord(activeResult.skillCoordinate)}
+                      onClick={() =>
+                        navigate({
+                          to: '/space/$namespace/$slug',
+                          params: { namespace: activeLink.namespace, slug: activeLink.slug },
+                        })
+                      }
                     >
-                      {winnerCoord === activeResult.skillCoordinate ? (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-                          已选择
-                        </>
-                      ) : (
-                        '选择这个'
-                      )}
+                      去详情页
+                      <ChevronRight className="w-3.5 h-3.5 ml-1.5" />
                     </Button>
+                  )}
+                  {activeResult.output && activeLink?.kind === 'external' && (
+                    <a href={activeLink.href} target="_blank" rel="noopener noreferrer">
+                      <Button size="sm" variant="outline">
+                        查看源
+                        <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
+                      </Button>
+                    </a>
                   )}
                 </div>
                 {activeResult.appliedReason && (
@@ -599,7 +597,7 @@ export function ForkprobeWorkbenchPage() {
                   }}
                 >
                   <div
-                    className="text-sm leading-relaxed whitespace-pre-wrap"
+                    className="text-base leading-7 whitespace-pre-wrap max-w-[72ch]"
                     style={{ color: 'hsl(var(--foreground))' }}
                   >
                     {activeResult.output}
@@ -632,125 +630,6 @@ export function ForkprobeWorkbenchPage() {
           )}
         </main>
 
-        {/* ===== RIGHT ===== */}
-        <aside className="fp-right">
-          {isCompleted ? (
-            <div className="space-y-6">
-              {/* AI Review recommendation (independent judge) */}
-              <div>
-                <strong className="text-sm" style={{ color: 'hsl(var(--foreground))' }}>
-                  AI 评审推荐
-                </strong>
-                {review && reviewWinner ? (
-                  <>
-                    <div className="flex items-center justify-between mt-1">
-                      <p className="text-lg font-bold text-primary">{reviewWinner.skillName}</p>
-                      {reviewWinnerOverall != null && (
-                        <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary shrink-0">
-                          {reviewWinnerOverall}%
-                        </span>
-                      )}
-                    </div>
-                    {review.winnerReason && (
-                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                        {review.winnerReason}
-                      </p>
-                    )}
-
-                    {reviewWinnerScores.length > 0 && (
-                      <div className="mt-3 space-y-2">
-                        {reviewWinnerScores.map((dim) => (
-                          <div key={dim.label} className="flex items-center justify-between text-sm">
-                            <span className="text-muted-foreground">{dim.label}</span>
-                            <span
-                              className="font-mono font-bold"
-                              style={{ color: 'hsl(var(--foreground))' }}
-                            >
-                              {dim.score}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    完成对比后，独立评审会在此<br />
-                    推荐最佳技能并给出评分。
-                  </p>
-                )}
-              </div>
-
-              {/* Winner status */}
-              <div>
-                <strong className="text-sm" style={{ color: 'hsl(var(--foreground))' }}>
-                  {winnerResult ? (
-                    <span className="flex items-center gap-1.5">
-                      <Trophy className="w-4 h-4 text-amber-500" />
-                      已选择 winner
-                    </span>
-                  ) : (
-                    '尚未选择 winner'
-                  )}
-                </strong>
-                {!winnerResult && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    先选择最佳结果，<br />
-                    下方会生成交接文本。
-                  </p>
-                )}
-              </div>
-
-              {/* Continuation handoff */}
-              <div>
-                <div className="text-xs font-semibold mb-1.5" style={{ color: 'hsl(var(--foreground))' }}>
-                  Continuation handoff
-                </div>
-                <textarea
-                  readOnly
-                  className="w-full h-24 text-xs p-3 rounded-lg border resize-none"
-                  style={{
-                    background: 'hsl(var(--muted))',
-                    borderColor: 'hsl(var(--border))',
-                    color: 'hsl(var(--muted-foreground))',
-                  }}
-                  value={handoffText}
-                  placeholder="请选择一个候选结果。选中后，这里会生成一段可以粘贴回当前 Agent 会话的继续执行文本。"
-                />
-                <Button
-                  className="w-full mt-2"
-                  size="sm"
-                  variant="outline"
-                  disabled={!winnerResult}
-                  onClick={copyHandoff}
-                >
-                  {handoffCopied ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 mr-1.5" />
-                      已复制
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5 mr-1.5" />
-                      复制 handoff
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full min-h-[200px] text-center space-y-2">
-              <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center">
-                <Trophy className="w-6 h-6 text-muted-foreground/40" />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                完成对比后，<br />
-                评审结果和交接文本<br />
-                将显示在这里。
-              </p>
-            </div>
-          )}
-        </aside>
       </div>
     </div>
   )

@@ -4,6 +4,7 @@ import {
   useForkprobeRecommend,
   useStartComparison,
   useForkprobeComparisonStatus,
+  useCancelComparison,
 } from './use-forkprobe-queries'
 import type { PreselectedSkill } from './comparison-panel-context'
 import type { RecommendedSkill } from './forkprobe-api'
@@ -29,8 +30,10 @@ export interface UseForkprobeWorkbenchReturn {
   handleAddSkill: (skill: RecommendedSkill) => void
   handleGetRecommendations: () => void
   handleStartComparison: () => Promise<void>
+  handleCancelComparison: () => Promise<void>
   handleReset: () => void
   isStartingComparison: boolean
+  isCancellingComparison: boolean
 
   // Data
   config: ReturnType<typeof useForkprobeConfig>['data']
@@ -70,6 +73,7 @@ export function useForkprobeWorkbench(
     panelState === 'RECOMMENDING',
   )
   const startComparisonMutation = useStartComparison()
+  const cancelComparisonMutation = useCancelComparison()
   const statusQuery = useForkprobeComparisonStatus(
     panelState === 'RUNNING' || panelState === 'COMPLETED' ? comparisonId : null,
   )
@@ -96,6 +100,7 @@ export function useForkprobeWorkbench(
           domain: 'selected',
           source: 'selected',
           stars: 0,
+          sourceUrl: null,
         })
       }
     }
@@ -111,11 +116,15 @@ export function useForkprobeWorkbench(
     }
   }, [panelState, recommendQuery.isSuccess])
 
-  // RUNNING → COMPLETED when comparison finishes
+  // RUNNING → COMPLETED when comparison reaches a terminal state
   const statusData = statusQuery.data
   useEffect(() => {
     if (panelState === 'RUNNING' && statusData) {
-      if (statusData.status === 'COMPLETED' || statusData.status === 'FAILED') {
+      if (
+        statusData.status === 'COMPLETED' ||
+        statusData.status === 'FAILED' ||
+        statusData.status === 'CANCELLED'
+      ) {
         setPanelState('COMPLETED')
       }
     }
@@ -187,6 +196,16 @@ export function useForkprobeWorkbench(
     }
   }, [selectedSkills, taskDescription, startComparisonMutation])
 
+  const handleCancelComparison = useCallback(async () => {
+    if (!comparisonId) return
+    setError(null)
+    try {
+      await cancelComparisonMutation.mutateAsync(comparisonId)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '取消失败')
+    }
+  }, [comparisonId, cancelComparisonMutation])
+
   const handleReset = useCallback(() => {
     setPanelState('SELECTING')
     setComparisonId(null)
@@ -204,8 +223,10 @@ export function useForkprobeWorkbench(
     handleAddSkill,
     handleGetRecommendations,
     handleStartComparison,
+    handleCancelComparison,
     handleReset,
     isStartingComparison: startComparisonMutation.isPending,
+    isCancellingComparison: cancelComparisonMutation.isPending,
     config,
     recommendations,
     allSkills,

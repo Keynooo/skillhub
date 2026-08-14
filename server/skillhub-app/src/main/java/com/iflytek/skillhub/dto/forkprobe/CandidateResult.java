@@ -13,5 +13,8 @@ public record CandidateResult(
         /** null = not verified yet, true = ✅ skill applied, false = ⚠️ skill not applied */
         Boolean skillApplied,
         String appliedReason,
-        String error
+        String error,
+
+        /** GitHub source URL for catalog skills; null for SkillHub skills / baseline. */
+        String sourceUrl
 ) {}

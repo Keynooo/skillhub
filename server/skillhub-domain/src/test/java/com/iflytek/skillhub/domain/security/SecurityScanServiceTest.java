@@ -259,6 +259,33 @@ class SecurityScanServiceTest {
         verify(skillVersionRepository).save(version);
     }
 
+    @Test
+    void discardFailedPlaceholder_softDeletesUnscannedPlaceholder() {
+        SecurityAudit placeholder = new SecurityAudit(42L, ScannerType.SKILL_SCANNER);
+
+        given(auditRepository.findLatestActiveByVersionIdAndScannerType(42L, ScannerType.SKILL_SCANNER))
+                .willReturn(Optional.of(placeholder));
+
+        service.discardFailedPlaceholder(42L, ScannerType.SKILL_SCANNER);
+
+        assertThat(placeholder.isDeleted()).isTrue();
+        verify(auditRepository).save(placeholder);
+    }
+
+    @Test
+    void discardFailedPlaceholder_leavesCompletedAuditUntouched() {
+        SecurityAudit completed = new SecurityAudit(42L, ScannerType.SKILL_SCANNER);
+        completed.setScannedAt(java.time.Instant.now());
+
+        given(auditRepository.findLatestActiveByVersionIdAndScannerType(42L, ScannerType.SKILL_SCANNER))
+                .willReturn(Optional.of(completed));
+
+        service.discardFailedPlaceholder(42L, ScannerType.SKILL_SCANNER);
+
+        assertThat(completed.isDeleted()).isFalse();
+        verify(auditRepository, org.mockito.Mockito.never()).save(completed);
+    }
+
     private void setId(Object target, Long id) throws Exception {
         Field field = target.getClass().getDeclaredField("id");
         field.setAccessible(true);

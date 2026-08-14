@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.util.function.BooleanSupplier;
 
 /**
  * Phase 1 skill executor that calls the Anthropic Messages API directly.
@@ -34,7 +35,11 @@ class DirectApiSkillExecutor implements SkillExecutor {
     }
 
     @Override
-    public SkillResult execute(String skillSystemPrompt, String taskDescription, String skillName) {
+    public SkillResult execute(String skillSystemPrompt, String taskDescription, String skillName,
+                               BooleanSupplier cancelled) {
+        if (cancelled.getAsBoolean()) {
+            return new SkillResult("", 0, 0, "已取消");
+        }
         Instant start = Instant.now();
         try {
             AnthropicMessageResponse response = anthropicService.sendMessageWithRetry(
@@ -53,11 +58,12 @@ class DirectApiSkillExecutor implements SkillExecutor {
             return false;
         }
 
-        // Quick heuristic: check for refusal/error patterns
+        // Quick heuristic: only reject clear refusals. Do NOT gate on output length —
+        // a legitimate short result (e.g. a single polished sentence) is a valid skill
+        // application and must reach the LLM verification below.
         String trimmed = output.trim();
         if (trimmed.startsWith("I cannot") || trimmed.startsWith("I'm unable")
-                || trimmed.startsWith("抱歉，我无法") || trimmed.startsWith("对不起")
-                || trimmed.length() < 50) {
+                || trimmed.startsWith("抱歉，我无法") || trimmed.startsWith("对不起")) {
             return false;
         }
 

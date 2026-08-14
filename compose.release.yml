@@ -110,8 +110,17 @@ services:
       SKILLHUB_AUTH_PASSWORD_RESET_FROM_ADDRESS: ${SKILLHUB_AUTH_PASSWORD_RESET_FROM_ADDRESS:-noreply@skillhub.local}
       SKILLHUB_AUTH_PASSWORD_RESET_FROM_NAME: ${SKILLHUB_AUTH_PASSWORD_RESET_FROM_NAME:-SkillHub}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SKILLHUB_FORKPROBE_EXECUTOR_MODE: ${SKILLHUB_FORKPROBE_EXECUTOR_MODE:-direct-api}
+      SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_IMAGE: ${SKILLHUB_SANDBOX_IMAGE:-ghcr.io/iflytek/skillhub-sandbox}:${SKILLHUB_VERSION:-latest}
+      SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_NETWORK: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_NETWORK:-bridge}
+      SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_MAX_CONCURRENCY: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_MAX_CONCURRENCY:-4}
     volumes:
       - skillhub_storage:/var/lib/skillhub/storage
+      # DinD: the server spawns forkprobe sandbox containers via `docker run`,
+      # so it needs the host daemon socket. NOTE: this grants the server
+      # container control of the host Docker daemon — keep the socket read-only
+      # and treat the server container as a privileged trust boundary.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,6 +156,14 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+
+  # Sandbox image for forkprobe's Docker execution mode. Declared here only so
+  # `docker compose pull` pre-fetches it to the host daemon; the server runs it
+  # on demand via `docker run` and never as a long-lived service.
+  skillhub-sandbox:
+    image: ${SKILLHUB_SANDBOX_IMAGE:-ghcr.io/iflytek/skillhub-sandbox}:${SKILLHUB_VERSION:-latest}
+    command: ["true"]
+    restart: "no"
 
 volumes:
   postgres_data:

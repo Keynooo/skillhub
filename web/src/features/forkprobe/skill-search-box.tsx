@@ -80,6 +80,7 @@ export function SkillSearchBox({ selected, onAdd, maxSelect }: SkillSearchBoxPro
                     domain: 'skillhub',
                     source: 'skillhub',
                     stars: s.starCount ?? 0,
+                    sourceUrl: null,
                   })
                 }
                 className={cn(

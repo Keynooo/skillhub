@@ -9,6 +9,8 @@ import com.iflytek.skillhub.domain.namespace.NamespaceMemberRepository;
 import com.iflytek.skillhub.domain.namespace.NamespaceRepository;
 import com.iflytek.skillhub.domain.namespace.NamespaceStatus;
 import com.iflytek.skillhub.domain.security.SecurityScanService;
+import com.iflytek.skillhub.domain.label.LabelTask;
+import com.iflytek.skillhub.domain.label.LabelTaskProducer;
 import com.iflytek.skillhub.domain.review.ReviewTask;
 import com.iflytek.skillhub.domain.review.ReviewTaskRepository;
 import com.iflytek.skillhub.domain.shared.exception.DomainBadRequestException;
@@ -77,6 +79,8 @@ class SkillPublishServiceTest {
     private ApplicationEventPublisher eventPublisher;
     @Mock
     private SkillStorageDeletionCompensationService compensationService;
+    @Mock
+    private LabelTaskProducer labelTaskProducer;
 
     private SkillPublishService service;
     private ObjectMapper objectMapper;
@@ -99,7 +103,9 @@ class SkillPublishServiceTest {
                 securityScanService,
                 compensationService,
                 eventPublisher,
-                CLOCK
+                CLOCK,
+                labelTaskProducer,
+                true
         );
         lenient().when(securityScanService.isEnabled()).thenReturn(true);
         lenient().when(skillVersionRepository.findBySkillIdAndStatus(anyLong(), eq(SkillVersionStatus.PENDING_REVIEW)))
@@ -174,6 +180,11 @@ class SkillPublishServiceTest {
         assertEquals(10L, submittedEvent.versionId());
         assertEquals(publisherId, submittedEvent.submitterId());
         assertEquals(1L, submittedEvent.namespaceId());
+
+        ArgumentCaptor<LabelTask> labelTaskCaptor = ArgumentCaptor.forClass(LabelTask.class);
+        verify(labelTaskProducer).publishLabelTask(labelTaskCaptor.capture());
+        assertEquals(1L, labelTaskCaptor.getValue().skillId());
+        assertEquals("test-skill", labelTaskCaptor.getValue().skillName());
     }
 
     @Test

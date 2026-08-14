@@ -195,7 +195,7 @@ export function SkillLabelPanel({ namespace, slug, initialLabels, canManage, isS
                 onClick={() => handleAttach(label.slug)}
                 disabled={isMutating}
               >
-                {attachMutation.isPending ? t('skillDetail.processing') : t('skillDetail.addLabel', { label: label.displayName })}
+                {attachMutation.isPending ? t('skillDetail.processing') : label.displayName}
               </Button>
             ))}
           </div>

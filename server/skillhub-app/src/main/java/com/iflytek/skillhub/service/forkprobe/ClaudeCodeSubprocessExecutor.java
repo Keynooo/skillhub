@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 /**
  * Phase A skill executor that spawns the Claude Code CLI in a throwaway workspace.
@@ -47,7 +48,8 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
     }
 
     @Override
-    public SkillResult execute(String skillSystemPrompt, String taskDescription, String skillName) {
+    public SkillResult execute(String skillSystemPrompt, String taskDescription, String skillName,
+                               BooleanSupplier cancelled) {
         Instant start = Instant.now();
         Path workspace = null;
         try {
@@ -62,24 +64,47 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
                 stdin.write(prompt.getBytes(StandardCharsets.UTF_8));
             }
 
-            boolean finished = process.waitFor(properties.getTimeoutSeconds(), TimeUnit.SECONDS);
-            float latency = Duration.between(start, Instant.now()).toMillis() / 1000.0f;
-            if (!finished) {
-                process.destroyForcibly();
-                process.waitFor(5, TimeUnit.SECONDS);
-                return new SkillResult("", 0, latency,
-                        "执行超时（>" + properties.getTimeoutSeconds() + "s）");
+            SkillResult early = awaitCompletion(process, start, cancelled);
+            if (early != null) {
+                return early;
             }
 
             String stdout = Files.readString(stdoutFile, StandardCharsets.UTF_8);
-            return parseResult(stdout, latency, process.exitValue());
+            return parseResult(stdout, elapsedSeconds(start), process.exitValue());
         } catch (Exception e) {
             log.warn("Claude CLI execution failed for '{}': {}", skillName, e.getMessage());
-            float latency = Duration.between(start, Instant.now()).toMillis() / 1000.0f;
-            return new SkillResult("", 0, latency, e.getMessage());
+            return new SkillResult("", 0, elapsedSeconds(start), e.getMessage());
         } finally {
             deleteRecursively(workspace);
         }
+    }
+
+    /**
+     * Wait for the subprocess to finish, bounded by {@code timeoutSeconds}, while
+     * honouring the comparison run's cancel flag. Returns a terminal result if the
+     * process was killed (cancel or timeout), or {@code null} if it exited normally.
+     */
+    private SkillResult awaitCompletion(Process process, Instant start, BooleanSupplier cancelled)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + properties.getTimeoutSeconds() * 1000L;
+        while (!process.waitFor(500, TimeUnit.MILLISECONDS)) {
+            if (cancelled.getAsBoolean()) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+                return new SkillResult("", 0, elapsedSeconds(start), "已取消");
+            }
+            if (System.currentTimeMillis() > deadline) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+                return new SkillResult("", 0, elapsedSeconds(start),
+                        "执行超时（>" + properties.getTimeoutSeconds() + "s）");
+            }
+        }
+        return null;
+    }
+
+    private static float elapsedSeconds(Instant start) {
+        return Duration.between(start, Instant.now()).toMillis() / 1000.0f;
     }
 
     @Override
@@ -89,8 +114,7 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
         }
         String trimmed = output.trim();
         if (trimmed.startsWith("I cannot") || trimmed.startsWith("I'm unable")
-                || trimmed.startsWith("抱歉，我无法") || trimmed.startsWith("对不起")
-                || trimmed.length() < 50) {
+                || trimmed.startsWith("抱歉，我无法") || trimmed.startsWith("对不起")) {
             return false;
         }
         try {

@@ -19,6 +19,16 @@ const ORIGINAL_URL_SEARCH = typeof window !== 'undefined' ? window.location.sear
 // Export for use in cli-auth page
 export { ORIGINAL_URL_SEARCH }
 
+/**
+ * Normalize a raw `label` search param (string, string[], or absent) into a deduplicated
+ * non-empty slug list. Repeated `label` params arrive as an array; a single one as a string.
+ */
+function normalizeLabelList(value: unknown): string[] | undefined {
+  const raw = Array.isArray(value) ? value : typeof value === 'string' && value.length > 0 ? [value] : []
+  const labels = raw.filter((item): item is string => typeof item === 'string' && item.length > 0)
+  return labels.length > 0 ? [...new Set(labels)] : undefined
+}
+
 function createLazyRouteComponent<TModule extends Record<string, unknown>>(
   importer: () => Promise<TModule>,
   exportName: keyof TModule,
@@ -212,11 +222,11 @@ const searchRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'search',
   component: SearchPage,
-  validateSearch: (search: Record<string, unknown>): { q: string; namespace?: string; label?: string; sort: string; page: number; starredOnly: boolean } => {
+  validateSearch: (search: Record<string, unknown>): { q: string; namespace?: string; labels?: string[]; sort: string; page: number; starredOnly: boolean } => {
     return {
       q: normalizeSearchQuery(typeof search.q === 'string' ? search.q : ''),
       namespace: typeof search.namespace === 'string' && search.namespace ? search.namespace.replace(/^@/, '') : undefined,
-      label: typeof search.label === 'string' && search.label ? search.label : undefined,
+      labels: normalizeLabelList(search.labels),
       sort: (search.sort as string) || 'newest',
       page: Number(search.page) || 0,
       starredOnly: search.starredOnly === true || search.starredOnly === 'true',

@@ -92,7 +92,7 @@ export function SearchPage() {
 
   const q = normalizeSearchQuery(searchParams.q || '')
   const namespace = (searchParams.namespace || '').replace(/^@/, '')
-  const selectedLabel = searchParams.label || ''
+  const selectedLabels = searchParams.labels ?? []
   const sort = searchParams.sort || 'newest'
   const page = searchParams.page ?? 0
   const starredOnly = searchParams.starredOnly ?? false
@@ -120,7 +120,7 @@ export function SearchPage() {
   const { data, isLoading, isFetching } = useSearchSkills({
     q,
     namespace: namespace || undefined,
-    label: selectedLabel || undefined,
+    labels: selectedLabels.length > 0 ? selectedLabels : undefined,
     sort,
     page,
     size: PAGE_SIZE,
@@ -142,44 +142,46 @@ export function SearchPage() {
 
     if (!parsedInput.query && !parsedInput.namespace) {
       startTransition(() => {
-        navigate({ to: '/search', search: { q: '', namespace: '', label: selectedLabel, sort, page: 0, starredOnly }, replace: page === 0 })
+        navigate({ to: '/search', search: { q: '', namespace: '', labels: selectedLabels, sort, page: 0, starredOnly }, replace: page === 0 })
       })
       return
     }
 
     const timeoutId = window.setTimeout(() => {
       startTransition(() => {
-        navigate({ to: '/search', search: { q: parsedInput.query, namespace: parsedInput.namespace, label: selectedLabel, sort, page: 0, starredOnly }, replace: true })
+        navigate({ to: '/search', search: { q: parsedInput.query, namespace: parsedInput.namespace, labels: selectedLabels, sort, page: 0, starredOnly }, replace: true })
       })
     }, 250)
 
     return () => window.clearTimeout(timeoutId)
-  }, [navigate, namespace, page, q, queryInput, selectedLabel, sort, starredOnly])
+  }, [navigate, namespace, page, q, queryInput, selectedLabels, sort, starredOnly])
 
   const handleSearch = (query: string) => {
     const parsedInput = parseNamespaceSearchInput(query)
     setQueryInput(query)
     startTransition(() => {
-      navigate({ to: '/search', search: { q: parsedInput.query, namespace: parsedInput.namespace, label: selectedLabel, sort, page: 0, starredOnly }, replace: true })
+      navigate({ to: '/search', search: { q: parsedInput.query, namespace: parsedInput.namespace, labels: selectedLabels, sort, page: 0, starredOnly }, replace: true })
     })
   }
 
   const handleSortChange = (newSort: string) => {
-    navigate({ to: '/search', search: { q, namespace, label: selectedLabel, sort: newSort, page: 0, starredOnly } })
+    navigate({ to: '/search', search: { q, namespace, labels: selectedLabels, sort: newSort, page: 0, starredOnly } })
   }
 
   const handlePageChange = (newPage: number) => {
     blurActiveElement()
-    navigate({ to: '/search', search: { q, namespace, label: selectedLabel, sort, page: newPage, starredOnly } })
+    navigate({ to: '/search', search: { q, namespace, labels: selectedLabels, sort, page: newPage, starredOnly } })
   }
 
   const handleLabelToggle = (label: string) => {
-    const nextLabel = selectedLabel === label ? '' : label
-    navigate({ to: '/search', search: { q, namespace, label: nextLabel, sort, page: 0, starredOnly } })
+    const nextLabels = selectedLabels.includes(label)
+      ? selectedLabels.filter((item) => item !== label)
+      : [...selectedLabels, label]
+    navigate({ to: '/search', search: { q, namespace, labels: nextLabels, sort, page: 0, starredOnly } })
   }
 
   const handleNamespaceClear = () => {
-    navigate({ to: '/search', search: { q, namespace: '', label: selectedLabel, sort, page: 0, starredOnly } })
+    navigate({ to: '/search', search: { q, namespace: '', labels: selectedLabels, sort, page: 0, starredOnly } })
   }
 
   const handleStarredToggle = () => {
@@ -193,7 +195,7 @@ export function SearchPage() {
       return
     }
 
-    navigate({ to: '/search', search: { q, namespace, label: selectedLabel, sort, page: 0, starredOnly: !starredOnly } })
+    navigate({ to: '/search', search: { q, namespace, labels: selectedLabels, sort, page: 0, starredOnly: !starredOnly } })
   }
 
   const handleSkillClick = (namespace: string, slug: string) => {
@@ -284,7 +286,7 @@ export function SearchPage() {
           {!starredOnly && labels?.map((label) => (
             <Button
               key={label.slug}
-              variant={selectedLabel === label.slug ? 'default' : 'outline'}
+              variant={selectedLabels.includes(label.slug) ? 'default' : 'outline'}
               size="sm"
               onClick={() => handleLabelToggle(label.slug)}
             >

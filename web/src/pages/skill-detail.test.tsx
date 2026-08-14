@@ -346,7 +346,7 @@ describe('SkillDetailPage', () => {
 
     expect(html).toContain('skillDetail.labelsSectionTitle')
     expect(html).toContain('skillDetail.removeLabel')
-    expect(html).toContain('skillDetail.addLabel')
+    expect(html).toContain('Code Generation')
   })
 
   it('hides the label management panel when the viewer lacks label permissions', () => {

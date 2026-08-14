@@ -15,6 +15,14 @@ public class AnthropicProperties {
     /** Model to use for comparison runs (default: haiku for cost efficiency). */
     private String model = "claude-haiku-4-5-20251001";
 
+    /**
+     * Model for deterministic judge/verification calls (forkprobe review + skill
+     * verification). Empty means fall back to {@link #model}. Use a non-reasoning
+     * model here so the judge returns its verdict directly instead of burning the
+     * token budget on a "thinking" block.
+     */
+    private String judgeModel = "";
+
     /** Maximum output tokens per skill execution. */
     private int maxTokens = 4096;
 
@@ -41,6 +49,14 @@ public class AnthropicProperties {
 
     public void setModel(String model) {
         this.model = model;
+    }
+
+    public String getJudgeModel() {
+        return judgeModel;
+    }
+
+    public void setJudgeModel(String judgeModel) {
+        this.judgeModel = judgeModel;
     }
 
     public int getMaxTokens() {

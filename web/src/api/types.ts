@@ -164,6 +164,7 @@ export interface SkillSummary {
   id: number
   slug: string
   displayName: string
+  ownerDisplayName?: string
   summary?: string
   visibility?: string
   status?: string
@@ -174,6 +175,7 @@ export interface SkillSummary {
   namespace: string
   updatedAt: string
   canSubmitPromotion: boolean
+  labels?: LabelItem[]
   headlineVersion?: SkillLifecycleVersion
   publishedVersion?: SkillLifecycleVersion
   ownerPreviewVersion?: SkillLifecycleVersion
@@ -332,7 +334,7 @@ export interface SkillTag {
 export interface SearchParams {
   q?: string
   namespace?: string
-  label?: string
+  labels?: string[]
   sort?: string
   page?: number
   size?: number

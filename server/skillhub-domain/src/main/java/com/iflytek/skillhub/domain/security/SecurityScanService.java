@@ -120,6 +120,26 @@ public class SecurityScanService {
         skillVersionRepository.save(version);
     }
 
+    /**
+     * Soft-delete the in-progress placeholder audit left behind when a scan fails permanently.
+     *
+     * <p>{@code triggerScan} always persists a placeholder audit (verdict SUSPICIOUS, no
+     * {@code scannedAt}) before publishing the scan task. When the scan later fails permanently,
+     * {@code markFailed} can only transition a {@code SCANNING} version to {@code SCAN_FAILED};
+     * an already-{@code PUBLISHED} version keeps its status, leaving the orphaned placeholder to
+     * render as "scanning" forever. Discarding that placeholder (when it has never been scanned)
+     * keeps the audit view honest instead of showing a perpetual "in progress" badge.
+     */
+    @Transactional
+    public void discardFailedPlaceholder(Long versionId, ScannerType scannerType) {
+        auditRepository.findLatestActiveByVersionIdAndScannerType(versionId, scannerType)
+                .filter(audit -> audit.getScannedAt() == null)
+                .ifPresent(audit -> {
+                    audit.markAsDeleted();
+                    auditRepository.save(audit);
+                });
+    }
+
     private Path saveTempDirectory(Long versionId, List<PackageEntry> entries) {
         try {
             Path skillDir = TEMP_BASE_DIR.resolve(String.valueOf(versionId)).normalize();

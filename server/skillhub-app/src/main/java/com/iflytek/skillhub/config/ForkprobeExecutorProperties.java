@@ -41,6 +41,30 @@ public class ForkprobeExecutorProperties {
      */
     private boolean dangerouslySkipPermissions = true;
 
+    // --- Docker sandbox mode (mode=docker) ---
+
+    /** Docker image used as the sandbox runtime. */
+    private String sandboxImage = "skillhub-sandbox:latest";
+
+    /** Docker network mode for the sandbox container. Default {@code bridge} keeps LLM
+     *  API egress available; set {@code none} where an egress allowlist proxy is in place. */
+    private String sandboxNetwork = "bridge";
+
+    /** Memory limit per sandbox container ({@code docker run --memory}). */
+    private String sandboxMemory = "512m";
+
+    /** CPU limit per sandbox container ({@code docker run --cpus}). */
+    private String sandboxCpus = "1.0";
+
+    /** Process count limit per sandbox container ({@code docker run --pids-limit}). */
+    private int sandboxPidsLimit = 256;
+
+    /** UID:GID the container process runs as (nobody, non-root). */
+    private String sandboxUser = "65534:65534";
+
+    /** Maximum number of sandbox containers across all comparisons (global concurrency cap). */
+    private int sandboxMaxConcurrency = 4;
+
     public String getMode() {
         return mode;
     }
@@ -95,5 +119,61 @@ public class ForkprobeExecutorProperties {
 
     public void setDangerouslySkipPermissions(boolean dangerouslySkipPermissions) {
         this.dangerouslySkipPermissions = dangerouslySkipPermissions;
+    }
+
+    public String getSandboxImage() {
+        return sandboxImage;
+    }
+
+    public void setSandboxImage(String sandboxImage) {
+        this.sandboxImage = sandboxImage;
+    }
+
+    public String getSandboxNetwork() {
+        return sandboxNetwork;
+    }
+
+    public void setSandboxNetwork(String sandboxNetwork) {
+        this.sandboxNetwork = sandboxNetwork;
+    }
+
+    public String getSandboxMemory() {
+        return sandboxMemory;
+    }
+
+    public void setSandboxMemory(String sandboxMemory) {
+        this.sandboxMemory = sandboxMemory;
+    }
+
+    public String getSandboxCpus() {
+        return sandboxCpus;
+    }
+
+    public void setSandboxCpus(String sandboxCpus) {
+        this.sandboxCpus = sandboxCpus;
+    }
+
+    public int getSandboxPidsLimit() {
+        return sandboxPidsLimit;
+    }
+
+    public void setSandboxPidsLimit(int sandboxPidsLimit) {
+        this.sandboxPidsLimit = sandboxPidsLimit;
+    }
+
+    public String getSandboxUser() {
+        return sandboxUser;
+    }
+
+    public void setSandboxUser(String sandboxUser) {
+        this.sandboxUser = sandboxUser;
+    }
+
+    public int getSandboxMaxConcurrency() {
+        return sandboxMaxConcurrency;
+    }
+
+    public void setSandboxMaxConcurrency(int sandboxMaxConcurrency) {
+        this.sandboxMaxConcurrency = sandboxMaxConcurrency;
     }
 }

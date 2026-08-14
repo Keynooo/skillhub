@@ -13,6 +13,8 @@ import com.iflytek.skillhub.domain.skill.SkillVersionRepository;
 import com.iflytek.skillhub.domain.skill.SkillVersionStatus;
 import com.iflytek.skillhub.domain.skill.SkillVisibility;
 import com.iflytek.skillhub.domain.skill.service.SkillLifecycleProjectionService;
+import com.iflytek.skillhub.domain.user.UserAccountRepository;
+import com.iflytek.skillhub.service.SkillLabelAppService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -35,6 +37,12 @@ class JpaMySkillQueryRepositoryTest {
     @Mock
     private SkillVersionRepository skillVersionRepository;
 
+    @Mock
+    private SkillLabelAppService skillLabelAppService;
+
+    @Mock
+    private UserAccountRepository userAccountRepository;
+
     private JpaMySkillQueryRepository repository;
 
     @BeforeEach
@@ -42,7 +50,9 @@ class JpaMySkillQueryRepositoryTest {
         repository = new JpaMySkillQueryRepository(
                 namespaceRepository,
                 promotionRequestRepository,
-                new SkillLifecycleProjectionService(skillVersionRepository)
+                new SkillLifecycleProjectionService(skillVersionRepository),
+                skillLabelAppService,
+                userAccountRepository
         );
     }
 

@@ -194,6 +194,39 @@ validate_redis_cluster_database() {
   esac
 }
 
+extract_keys() {
+  # $1=file  $2=env|template. "env" reads uncommented KEY=value lines only;
+  # "template" also counts commented-out `# KEY=value` lines as documented keys.
+  awk -F= -v mode="$2" '
+    {
+      key = $1
+      gsub(/^[[:space:]]+/, "", key)
+      if (mode == "env" && key ~ /^#/) next
+      gsub(/^#/, "", key)
+      gsub(/^[[:space:]]+/, "", key)
+      gsub(/[[:space:]]+$/, "", key)
+      if (key ~ /^[A-Za-z_][A-Za-z0-9_]*$/) print key
+    }
+  ' "$1" 2>/dev/null | sort -u
+}
+
+diff_template_keys() {
+  template="${2:-.env.release.example}"
+  if [ ! -f "$template" ]; then
+    warn "template not found: $template (skipping drift check)"
+    return 0
+  fi
+
+  env_keys=$(extract_keys "$ENV_FILE" env)
+  template_keys=$(extract_keys "$template" template)
+
+  for key in $env_keys; do
+    if ! printf '%s\n' "$template_keys" | grep -qx "$key"; then
+      warn "$key is set in $ENV_FILE but not documented in $template (possible drift or typo)"
+    fi
+  done
+}
+
 require_non_empty SKILLHUB_PUBLIC_BASE_URL
 validate_url SKILLHUB_PUBLIC_BASE_URL
 validate_no_trailing_slash SKILLHUB_PUBLIC_BASE_URL
@@ -225,6 +258,8 @@ validate_boolean SKILLHUB_STORAGE_S3_FORCE_PATH_STYLE
 validate_boolean SKILLHUB_STORAGE_S3_AUTO_CREATE_BUCKET
 validate_boolean SPRING_DATA_REDIS_SSL_ENABLED
 validate_boolean SKILLHUB_REDIS_SENTINEL_CHECK_SENTINELS_LIST
+validate_boolean SKILLHUB_LABEL_AUTOTAGGING_ENABLED
+validate_boolean SKILLHUB_LABEL_AUTOTAGGING_BACKFILL
 
 validate_port POSTGRES_PORT
 validate_port REDIS_PORT
@@ -290,6 +325,16 @@ fi
 if [ -n "$oauth_secret" ] && [ -z "$oauth_id" ]; then
   error "OAUTH2_GITHUB_CLIENT_ID is required when OAUTH2_GITHUB_CLIENT_SECRET is set"
 fi
+
+if [ "${SKILLHUB_LABEL_AUTOTAGGING_ENABLED:-false}" = "true" ]; then
+  require_non_empty ANTHROPIC_API_KEY
+  reject_patterns ANTHROPIC_API_KEY "TODO_*" "todo_*" "replace*"
+  validate_url ANTHROPIC_BASE_URL
+  validate_non_negative_integer ANTHROPIC_MAX_TOKENS
+fi
+
+# Surface config drift: any key set in the env file but absent from the tracked template.
+diff_template_keys "$ENV_FILE" "$(dirname "$0")/../.env.release.example"
 
 if [ "$errors" -gt 0 ]; then
   echo "Release config validation failed: $errors error(s), $warnings warning(s)." >&2

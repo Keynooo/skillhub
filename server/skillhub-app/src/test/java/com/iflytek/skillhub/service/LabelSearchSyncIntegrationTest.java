@@ -2,6 +2,7 @@ package com.iflytek.skillhub.service;
 
 import com.iflytek.skillhub.SkillhubApplication;
 import com.iflytek.skillhub.TestRedisConfig;
+import com.iflytek.skillhub.auth.rbac.RbacService;
 import com.iflytek.skillhub.domain.label.LabelDefinition;
 import com.iflytek.skillhub.domain.label.LabelDefinitionRepository;
 import com.iflytek.skillhub.domain.label.LabelTranslation;
@@ -23,6 +24,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -82,10 +84,16 @@ class LabelSearchSyncIntegrationTest {
     @MockBean
     private SearchEmbeddingService searchEmbeddingService;
 
+    @MockBean
+    private RbacService rbacService;
+
     @BeforeEach
     void setUp() {
         when(searchEmbeddingService.embed(anyString())).thenReturn("");
         when(searchEmbeddingService.similarity(anyString(), anyString())).thenReturn(0.0d);
+        // Manual label attach/detach is SUPER_ADMIN-only; make the acting user a super admin so the
+        // permission gate passes and the test can focus on the search-index sync behavior.
+        when(rbacService.getUserRoleCodes(anyString())).thenReturn(Set.of("SUPER_ADMIN"));
     }
 
     @Test
@@ -117,7 +125,7 @@ class LabelSearchSyncIntegrationTest {
         // Baseline: nothing indexed yet.
         assertThat(skillSearchDocumentJpaRepository.findBySkillId(skill.getId())).isEmpty();
 
-        // Act: attach the label as the skill owner (passes resolve + permission checks).
+        // Act: attach the label (permission gate passes because rbacService is stubbed as SUPER_ADMIN).
         Map<Long, NamespaceRole> ownerRoles = Map.of(namespace.getId(), NamespaceRole.OWNER);
         skillLabelAppService.attachLabel(
                 namespace.getSlug(),

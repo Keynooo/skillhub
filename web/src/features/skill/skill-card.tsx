@@ -1,11 +1,12 @@
 import type { SkillSummary } from '@/api/types'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/use-auth'
 import { useStar } from '@/features/social/use-star'
 import { Card } from '@/shared/ui/card'
 import { NamespaceBadge } from '@/shared/components/namespace-badge'
 import { getHeadlineVersion } from '@/shared/lib/skill-lifecycle'
 import { formatCompactCount } from '@/shared/lib/number-format'
-import { Bookmark } from 'lucide-react'
+import { Bookmark, User } from 'lucide-react'
 
 interface SkillCardProps {
   skill: SkillSummary
@@ -17,6 +18,7 @@ interface SkillCardProps {
  * Reusable card for displaying one skill in lists such as landing, namespace, search, and stars.
  */
 export function SkillCard({ skill, onClick, highlightStarred = true }: SkillCardProps) {
+  const { t } = useTranslation()
   const { isAuthenticated } = useAuth()
   const { data: starStatus } = useStar(skill.id, highlightStarred && isAuthenticated)
   const showStarredHighlight = highlightStarred && isAuthenticated && starStatus?.starred
@@ -47,6 +49,12 @@ export function SkillCard({ skill, onClick, highlightStarred = true }: SkillCard
             <h3 className="font-semibold text-lg group-hover:text-primary transition-colors" style={{ color: 'hsl(var(--foreground))' }}>
               {skill.displayName}
             </h3>
+            {skill.ownerDisplayName && (
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                <User className="h-3 w-3" />
+                {t('skillDetail.authorLabel', { name: skill.ownerDisplayName })}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <NamespaceBadge type="TEAM" name={`@${skill.namespace}`} />
@@ -57,6 +65,23 @@ export function SkillCard({ skill, onClick, highlightStarred = true }: SkillCard
           <p className="text-sm text-muted-foreground mb-4 line-clamp-2 leading-relaxed">
             {skill.summary}
           </p>
+        )}
+
+        {(skill.labels?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {skill.labels!.map((label) => (
+              <span
+                key={label.slug}
+                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+                  label.type === 'PRIVILEGED'
+                    ? 'border-amber-500/40 bg-amber-100 text-amber-900'
+                    : 'border-slate-300 bg-slate-100 text-slate-800'
+                }`}
+              >
+                {label.displayName}
+              </span>
+            ))}
+          </div>
         )}
 
         <div className="mt-auto flex items-center gap-4 text-xs text-muted-foreground">

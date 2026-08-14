@@ -18,18 +18,9 @@ public class LabelPermissionChecker {
                                        String userId,
                                        Map<Long, NamespaceRole> userNamespaceRoles,
                                        Set<String> platformRoles) {
-        if (platformRoles.contains("SUPER_ADMIN")) {
-            return true;
-        }
-        if (userId == null) {
-            return false;
-        }
-        if (labelDefinition.getType() == LabelType.PRIVILEGED) {
-            return false;
-        }
-        NamespaceRole namespaceRole = userNamespaceRoles.get(skill.getNamespaceId());
-        return userId.equals(skill.getOwnerId())
-                || namespaceRole == NamespaceRole.ADMIN
-                || namespaceRole == NamespaceRole.OWNER;
+        // Skill labeling is now automated (LLM auto-tagging on publish). Manual attach/detach
+        // is reserved for SUPER_ADMIN so regular owners and namespace admins can no longer
+        // hand-pick labels; the unused parameters preserve the checker's call-site contract.
+        return platformRoles.contains("SUPER_ADMIN");
     }
 }

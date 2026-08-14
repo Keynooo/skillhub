@@ -15,8 +15,10 @@ export function buildSkillSearchUrl(params: SearchParams) {
     queryParams.append('namespace', cleanNamespace)
   }
 
-  if (params.label) {
-    queryParams.append('label', params.label)
+  if (params.labels && params.labels.length > 0) {
+    for (const label of params.labels) {
+      queryParams.append('label', label)
+    }
   }
 
   if (params.sort) {

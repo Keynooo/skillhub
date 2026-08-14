@@ -8,6 +8,9 @@ import com.iflytek.skillhub.domain.namespace.NamespaceService;
 import com.iflytek.skillhub.domain.skill.Skill;
 import com.iflytek.skillhub.domain.skill.SkillRepository;
 import com.iflytek.skillhub.domain.skill.service.SkillLifecycleProjectionService;
+import com.iflytek.skillhub.domain.user.UserAccount;
+import com.iflytek.skillhub.domain.user.UserAccountRepository;
+import com.iflytek.skillhub.dto.SkillLabelDto;
 import com.iflytek.skillhub.dto.SkillSummaryResponse;
 import com.iflytek.skillhub.search.SearchQuery;
 import com.iflytek.skillhub.search.SearchQueryService;
@@ -37,6 +40,8 @@ public class SkillSearchAppService {
     private final NamespaceService namespaceService;
     private final SkillLifecycleProjectionService skillLifecycleProjectionService;
     private final RbacService rbacService;
+    private final SkillLabelAppService skillLabelAppService;
+    private final UserAccountRepository userAccountRepository;
 
     public SkillSearchAppService(
             SearchQueryService searchQueryService,
@@ -44,13 +49,17 @@ public class SkillSearchAppService {
             NamespaceRepository namespaceRepository,
             NamespaceService namespaceService,
             SkillLifecycleProjectionService skillLifecycleProjectionService,
-            RbacService rbacService) {
+            RbacService rbacService,
+            SkillLabelAppService skillLabelAppService,
+            UserAccountRepository userAccountRepository) {
         this.searchQueryService = searchQueryService;
         this.skillRepository = skillRepository;
         this.namespaceRepository = namespaceRepository;
         this.namespaceService = namespaceService;
         this.skillLifecycleProjectionService = skillLifecycleProjectionService;
         this.rbacService = rbacService;
+        this.skillLabelAppService = skillLabelAppService;
+        this.userAccountRepository = userAccountRepository;
     }
 
     public record SearchResponse(
@@ -221,18 +230,41 @@ public class SkillSearchAppService {
                 .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().getSlug()));
         Map<Long, SkillLifecycleProjectionService.Projection> projectionsBySkillId =
                 skillLifecycleProjectionService.projectPublishedSummaries(matchedSkills);
+        Map<Long, List<SkillLabelDto>> labelsBySkillId =
+                skillLabelAppService.listSkillLabelsBySkillIds(skillIds);
+        Map<String, String> ownerDisplayNamesById = resolveOwnerDisplayNames(matchedSkills);
 
         return skillIds.stream()
                 .map(skillsById::get)
                 .filter(java.util.Objects::nonNull)
-                .map(skill -> toSummaryResponse(skill, namespaceSlugsById, projectionsBySkillId.get(skill.getId())))
+                .map(skill -> toSummaryResponse(
+                        skill,
+                        namespaceSlugsById,
+                        projectionsBySkillId.get(skill.getId()),
+                        labelsBySkillId.getOrDefault(skill.getId(), List.of()),
+                        ownerDisplayNamesById.get(skill.getOwnerId())))
                 .toList();
+    }
+
+    private Map<String, String> resolveOwnerDisplayNames(List<Skill> skills) {
+        List<String> ownerIds = skills.stream()
+                .map(Skill::getOwnerId)
+                .distinct()
+                .toList();
+        if (ownerIds.isEmpty()) {
+            return Map.of();
+        }
+        return userAccountRepository.findByIdIn(ownerIds).stream()
+                .filter(account -> account.getDisplayName() != null && !account.getDisplayName().isBlank())
+                .collect(Collectors.toMap(UserAccount::getId, UserAccount::getDisplayName, (first, second) -> first));
     }
 
     private SkillSummaryResponse toSummaryResponse(
             Skill skill,
             Map<Long, String> namespaceSlugsById,
-            SkillLifecycleProjectionService.Projection projection) {
+            SkillLifecycleProjectionService.Projection projection,
+            List<SkillLabelDto> labels,
+            String ownerDisplayName) {
         String namespaceSlug = namespaceSlugsById.get(skill.getNamespaceId());
 
         return new SkillSummaryResponse(
@@ -252,7 +284,9 @@ public class SkillSearchAppService {
                 toLifecycleVersion(projection.headlineVersion()),
                 toLifecycleVersion(projection.publishedVersion()),
                 toLifecycleVersion(projection.ownerPreviewVersion()),
-                projection.resolutionMode().name()
+                projection.resolutionMode().name(),
+                labels,
+                ownerDisplayName
         );
     }
 

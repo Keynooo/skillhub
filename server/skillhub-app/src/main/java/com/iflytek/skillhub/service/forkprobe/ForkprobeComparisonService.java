@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iflytek.skillhub.config.AnthropicProperties;
 import com.iflytek.skillhub.config.ForkprobeExecutorProperties;
+import com.iflytek.skillhub.domain.namespace.NamespaceRole;
 import com.iflytek.skillhub.domain.skill.service.SkillQueryService;
+import com.iflytek.skillhub.dto.SkillSummaryResponse;
 import com.iflytek.skillhub.dto.forkprobe.CandidateResult;
 import com.iflytek.skillhub.dto.forkprobe.CompareResponse;
 import com.iflytek.skillhub.dto.forkprobe.ComparisonStatusResponse;
@@ -13,7 +15,7 @@ import com.iflytek.skillhub.dto.forkprobe.ReviewResult;
 import com.iflytek.skillhub.dto.forkprobe.ReviewScore;
 import com.iflytek.skillhub.dto.forkprobe.SkillReview;
 import com.iflytek.skillhub.service.AnthropicService;
-import jakarta.annotation.PostConstruct;
+import com.iflytek.skillhub.service.SkillSearchAppService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,8 +23,6 @@ import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -66,13 +66,16 @@ public class ForkprobeComparisonService {
             "    }\n" +
             "  ]\n" +
             "}\n" +
-            "Each score is an integer 0-100. The \"winner\" must be one of the provided candidate " +
-            "coordinates. Include exactly one \"scores\" entry per candidate, in the same order provided.";
+            "Each score is an integer 0-100. The \"winner\" and every \"coordinate\" must be the exact " +
+            "coordinate string shown for that candidate (the text between the \"[N] \" prefix and the " +
+            "\" — \" separator), NOT the \"[N]\" label or the display name. Include exactly one \"scores\" " +
+            "entry per candidate, in the same order provided.";
 
     private final ConcurrentHashMap<String, ComparisonRun> comparisons = new ConcurrentHashMap<>();
     private final ScheduledExecutorService cleanupExecutor = Executors.newSingleThreadScheduledExecutor();
 
     private final SkillQueryService skillQueryService;
+    private final SkillSearchAppService skillSearchAppService;
     private final AnthropicService anthropicService;
     private final SkillExecutor skillExecutor;
     private final ExecutorService comparisonExecutor;
@@ -81,28 +84,29 @@ public class ForkprobeComparisonService {
     private final int maxSkillsCap;
     private final int comparisonTtlMinutes;
     private final int reviewMaxTokens;
-
-    /** Loaded catalog entries, keyed by domain name. */
-    private final Map<String, CatalogEntry> catalogs = new LinkedHashMap<>();
+    private final String judgeModel;
 
     public ForkprobeComparisonService(
             SkillQueryService skillQueryService,
+            SkillSearchAppService skillSearchAppService,
             AnthropicService anthropicService,
             AnthropicProperties anthropicProperties,
             ForkprobeExecutorProperties executorProperties,
+            Semaphore sandboxSemaphore,
             @Value("${skillhub.forkprobe.max-skills:3}") int maxSkills,
             @Value("${skillhub.forkprobe.max-skills-cap:5}") int maxSkillsCap,
             @Value("${skillhub.forkprobe.comparison-ttl-minutes:30}") int comparisonTtlMinutes,
-            @Value("${skillhub.forkprobe.review-max-tokens:1024}") int reviewMaxTokens) {
+            @Value("${skillhub.forkprobe.review-max-tokens:4096}") int reviewMaxTokens) {
         this.skillQueryService = skillQueryService;
+        this.skillSearchAppService = skillSearchAppService;
         this.anthropicService = anthropicService;
         this.maxSkills = maxSkills;
         this.maxSkillsCap = maxSkillsCap;
         this.comparisonTtlMinutes = comparisonTtlMinutes;
         this.reviewMaxTokens = reviewMaxTokens;
-        this.skillExecutor = "claude-cli".equalsIgnoreCase(executorProperties.getMode())
-                ? new ClaudeCodeSubprocessExecutor(anthropicService, executorProperties)
-                : new DirectApiSkillExecutor(anthropicService, anthropicProperties.getMaxTokens());
+        this.judgeModel = anthropicProperties.getJudgeModel();
+        this.skillExecutor = createSkillExecutor(
+                anthropicService, anthropicProperties, executorProperties, sandboxSemaphore);
         this.comparisonExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
         // Periodic cleanup of stale comparisons
@@ -110,59 +114,20 @@ public class ForkprobeComparisonService {
                 this::cleanupStaleComparisons, 5, 5, TimeUnit.MINUTES);
     }
 
-    @PostConstruct
-    void loadCatalogs() {
-        // Try project root first (when running from server/ via run-dev-app.sh)
-        Path catalogDir = Path.of("../builtin-skills/skills/forkprobe/catalog");
-        if (!Files.isDirectory(catalogDir)) {
-            // Fallback: try from project root / IDE
-            catalogDir = Path.of("builtin-skills/skills/forkprobe/catalog");
+    private static SkillExecutor createSkillExecutor(
+            AnthropicService anthropicService,
+            AnthropicProperties anthropicProperties,
+            ForkprobeExecutorProperties executorProperties,
+            Semaphore sandboxSemaphore) {
+        String mode = executorProperties.getMode();
+        if ("claude-cli".equalsIgnoreCase(mode)) {
+            return new ClaudeCodeSubprocessExecutor(anthropicService, executorProperties);
         }
-        if (!Files.isDirectory(catalogDir)) {
-            // Fallback: try when running from server/skillhub-app/target/
-            catalogDir = Path.of("../../../builtin-skills/skills/forkprobe/catalog");
+        if ("docker".equalsIgnoreCase(mode)) {
+            return new DockerSandboxSkillExecutor(
+                    anthropicService, anthropicProperties, executorProperties, sandboxSemaphore);
         }
-        if (!Files.isDirectory(catalogDir)) {
-            log.warn("forkprobe catalog directory not found: {} (cwd: {})",
-                    catalogDir.toAbsolutePath(), Path.of("").toAbsolutePath());
-            return;
-        }
-        try (var files = Files.list(catalogDir).filter(f -> f.getFileName().toString().endsWith(".json"))) {
-            files.forEach(catalogPath -> {
-                try {
-                    String content = Files.readString(catalogPath, StandardCharsets.UTF_8);
-                    JsonNode root = objectMapper.readTree(content);
-                    String domain = root.get("domain").asText();
-                    String desc = root.path("description").asText("");
-                    // Handle "skills", "candidates", or "pipelines" key
-                    JsonNode skillsNode = root.has("skills") ? root.get("skills")
-                            : root.has("candidates") ? root.get("candidates")
-                            : root.has("pipelines") ? root.get("pipelines") : null;
-                    List<CatalogSkill> catalogSkills = new ArrayList<>();
-                    if (skillsNode != null && skillsNode.isArray()) {
-                        for (JsonNode s : skillsNode) {
-                            // Use path() (never returns null) for fields that may be absent
-                            catalogSkills.add(new CatalogSkill(
-                                    s.path("id").asText(),
-                                    s.path("name").asText(),
-                                    s.path("author").asText(""),
-                                    s.path("category").asText(""),
-                                    s.path("approach").asText(""),
-                                    s.path("notes").asText(""),
-                                    s.path("summary_zh").asText("")
-                            ));
-                        }
-                    }
-                    catalogs.put(domain, new CatalogEntry(domain, desc, catalogSkills));
-                    log.info("Loaded forkprobe catalog: {} ({} skills)", domain, catalogSkills.size());
-                } catch (Exception e) {
-                    log.warn("Failed to load forkprobe catalog {}: {}", catalogPath, e.getMessage());
-                }
-            });
-        } catch (Exception e) {
-            log.warn("Failed to list forkprobe catalog directory: {}", e.getMessage());
-        }
-        log.info("forkprobe catalogs loaded: {} domains", catalogs.size());
+        return new DirectApiSkillExecutor(anthropicService, anthropicProperties.getMaxTokens());
     }
 
     // --- Public API ---
@@ -170,40 +135,56 @@ public class ForkprobeComparisonService {
     /**
      * Recommend skills for a given task description.
      * <p>
-     * Matches task keywords against catalog domains, returns catalog skills
-     * plus a baseline candidate.
+     * Searches the platform's own published skills (visibility-scoped to the
+     * requesting user) by relevance to the task, and returns them alongside a
+     * baseline candidate. Recommending only skills that already exist on the
+     * platform keeps the comparison meaningful: every candidate resolves to a
+     * real SKILL.md the user can open and reuse.
      */
-    public List<RecommendedSkill> recommend(String taskDescription, int maxCandidates) {
-        if (catalogs.isEmpty()) {
-            return List.of(baselineSkill());
-        }
-
-        // Match task to the most relevant catalog domain
-        String matchedDomain = matchDomain(taskDescription);
-        CatalogEntry entry = catalogs.getOrDefault(matchedDomain,
-                catalogs.values().iterator().next());
-
+    public List<RecommendedSkill> recommend(String taskDescription, int maxCandidates,
+                                            String userId, Map<Long, NamespaceRole> userNsRoles) {
         List<RecommendedSkill> candidates = new ArrayList<>();
         // Baseline always first
         candidates.add(baselineSkill());
 
-        // Add catalog skills with reasons
-        for (CatalogSkill cs : entry.skills()) {
-            if (candidates.size() >= maxCandidates + 1) break; // +1 for baseline
-            candidates.add(new RecommendedSkill(
-                    "catalog:" + cs.id(),
-                    cs.name(),
-                    "catalog",
-                    entry.description().length() > 80
-                            ? entry.description().substring(0, 80) + "..."
-                            : entry.description(),
-                    matchedDomain,
-                    "catalog",
-                    0
-            ));
+        try {
+            // Lexical relevance search first. The full-text engine ANDs every token, so a
+            // long/free-form task sentence usually matches nothing — fall back to the
+            // platform's visible skills so the user always has real platform skills to pick.
+            List<SkillSummaryResponse> matched =
+                    searchSkills(taskDescription, maxCandidates, userId, userNsRoles);
+            if (matched.isEmpty()) {
+                matched = searchSkills(null, maxCandidates, userId, userNsRoles);
+            }
+
+            for (SkillSummaryResponse skill : matched) {
+                if (candidates.size() >= maxCandidates + 1) break; // +1 for baseline
+                candidates.add(toRecommendedSkill(skill));
+            }
+        } catch (Exception e) {
+            log.warn("Platform skill recommendation failed: {}", e.getMessage());
         }
 
         return candidates;
+    }
+
+    private List<SkillSummaryResponse> searchSkills(String keyword, int size,
+                                                    String userId, Map<Long, NamespaceRole> userNsRoles) {
+        String sort = (keyword == null || keyword.isBlank()) ? "newest" : "relevance";
+        return skillSearchAppService.search(
+                keyword, null, sort, 0, size, List.of(), userId, userNsRoles).items();
+    }
+
+    private RecommendedSkill toRecommendedSkill(SkillSummaryResponse skill) {
+        String namespace = skill.namespace() != null ? skill.namespace() : "";
+        String coordinate = namespace.isBlank() ? skill.slug() : namespace + "/" + skill.slug();
+        String name = skill.displayName() != null && !skill.displayName().isBlank()
+                ? skill.displayName() : skill.slug();
+        String reasonZh = skill.summary() != null && !skill.summary().isBlank()
+                ? skill.summary() : "平台技能，可直接加入对比";
+        int stars = skill.starCount() != null ? skill.starCount() : 0;
+        return new RecommendedSkill(
+                coordinate, name, namespace, reasonZh, "skillhub", "skillhub", stars, null);
     }
 
     /**
@@ -237,6 +218,23 @@ public class ForkprobeComparisonService {
     }
 
     /**
+     * Cancel a running/pending comparison. In-flight skill executions are signalled to
+     * stop (subprocess/container executors destroy their process); the run is marked
+     * {@code CANCELLED} immediately so the polling frontend stops.
+     *
+     * @return {@code false} if the comparison no longer exists
+     */
+    public boolean cancelComparison(String comparisonId) {
+        ComparisonRun run = comparisons.get(comparisonId);
+        if (run == null) {
+            return false;
+        }
+        run.cancel();
+        log.info("Comparison {} cancelled", comparisonId);
+        return true;
+    }
+
+    /**
      * Get the current status of a comparison run (polling endpoint).
      */
     public Optional<ComparisonStatusResponse> getStatus(String comparisonId) {
@@ -251,12 +249,14 @@ public class ForkprobeComparisonService {
                     if (result == null) {
                         // Skill not started yet
                         return new CandidateResult(
-                                spec.coordinate(), spec.name(), null, 0, 0, null, null, null);
+                                spec.coordinate(), spec.name(), null, 0, 0, null, null, null,
+                                spec.sourceUrl());
                     }
                     if (!result.isCompleted()) {
                         return new CandidateResult(
                                 spec.coordinate(), spec.name(), null, 0,
-                                result.getLatencySeconds(), null, null, null);
+                                result.getLatencySeconds(), null, null, null,
+                                spec.sourceUrl());
                     }
                     return new CandidateResult(
                             spec.coordinate(),
@@ -266,7 +266,8 @@ public class ForkprobeComparisonService {
                             result.getLatencySeconds(),
                             result.getSkillApplied(),
                             result.getAppliedReason(),
-                            result.getError()
+                            result.getError(),
+                            spec.sourceUrl()
                     );
                 })
                 .collect(Collectors.toList());
@@ -292,7 +293,6 @@ public class ForkprobeComparisonService {
         config.put("maxSkills", maxSkills);
         config.put("maxSkillsCap", maxSkillsCap);
         config.put("apiKeyConfigured", anthropicService.isAvailable());
-        config.put("catalogDomains", new ArrayList<>(catalogs.keySet()));
         return config;
     }
 
@@ -315,6 +315,9 @@ public class ForkprobeComparisonService {
             List<CompletableFuture<Void>> futures = new ArrayList<>();
 
             for (ComparisonRun.SkillSpec spec : run.getSkills()) {
+                if (run.isCancelled()) {
+                    break;
+                }
                 CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                     try {
                         semaphore.acquire();
@@ -332,8 +335,15 @@ public class ForkprobeComparisonService {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                     .get(10, TimeUnit.MINUTES);
 
-            // Independent AI review pass — never fails the comparison itself
-            runReview(run);
+            if (run.isCancelled()) {
+                run.setStatus(ComparisonRun.Status.CANCELLED);
+                log.info("Comparison {} cancelled", comparisonId);
+                return;
+            }
+
+            // AI review has been disabled (product decision): the independent judge
+            // produced verdicts that contradicted the per-skill "applied" flag, so it
+            // is no longer surfaced. The comparison completes without a review pass.
 
             run.setStatus(ComparisonRun.Status.COMPLETED);
             log.info("Comparison {} completed: {} skills executed", comparisonId, run.getSkills().size());
@@ -353,9 +363,14 @@ public class ForkprobeComparisonService {
         ComparisonResult result = new ComparisonResult(spec.coordinate(), spec.name());
         run.addResult(spec.coordinate(), result);
 
+        if (run.isCancelled()) {
+            result.setError("已取消");
+            return;
+        }
+
         try {
             SkillExecutor.SkillResult sr = skillExecutor.execute(
-                    spec.systemPrompt(), run.getTaskDescription(), spec.name());
+                    spec.systemPrompt(), run.getTaskDescription(), spec.name(), run::isCancelled);
 
             result.setOutput(sr.output());
             result.setTokensUsed(sr.tokensUsed());
@@ -407,10 +422,19 @@ public class ForkprobeComparisonService {
 
         try {
             String userMessage = buildReviewPrompt(run.getTaskDescription(), completed);
-            AnthropicService.AnthropicMessageResponse response =
-                    anthropicService.sendMessageWithRetry(REVIEW_SYSTEM_PROMPT, userMessage, reviewMaxTokens, 0);
-
-            ReviewResult review = parseReview(response.content());
+            ReviewResult review = null;
+            // Reasoning models can burn the token budget on a "thinking" block and
+            // return blank/unparseable content; retry a few times before giving up.
+            for (int attempt = 0; attempt < 3 && review == null; attempt++) {
+                AnthropicService.AnthropicMessageResponse response =
+                        anthropicService.sendMessageWithRetry(REVIEW_SYSTEM_PROMPT, userMessage, reviewMaxTokens, 0, judgeModel);
+                ReviewResult parsed = parseReview(response.content());
+                review = parsed == null ? null : normalizeReview(parsed, completed);
+                if (review == null) {
+                    log.warn("Comparison {} review attempt {} returned blank/unparseable content; retrying",
+                            run.getComparisonId(), attempt + 1);
+                }
+            }
             if (review != null) {
                 run.setReview(review);
                 log.info("Comparison {} review completed: winner={}",
@@ -488,33 +512,62 @@ public class ForkprobeComparisonService {
         }
     }
 
+    /**
+     * Normalise the judge's candidate references back to raw coordinates.
+     * <p>
+     * The review prompt labels candidates as {@code [N] <coordinate> — <name>}; a
+     * judge (especially a reasoning model) may echo that whole label instead of the
+     * bare coordinate. The frontend matches {@code winnerCoordinate} /
+     * {@code scores[].coordinate} against {@code CandidateResult.skillCoordinate},
+     * so the raw coordinate must survive.
+     */
+    private ReviewResult normalizeReview(ReviewResult review, List<ComparisonResult> completed) {
+        String winner = mapJudgeCoordinate(review.winnerCoordinate(), completed);
+        List<SkillReview> scores = review.scores() == null ? List.of() : review.scores().stream()
+                .map(s -> new SkillReview(
+                        mapJudgeCoordinate(s.coordinate(), completed),
+                        s.overall(),
+                        s.dimensions()))
+                .toList();
+        return new ReviewResult(winner, review.winnerReason(), scores);
+    }
+
+    /**
+     * Map a judge-returned candidate reference to its raw coordinate, tolerant of the
+     * judge echoing the full {@code [N] coord — name} label or a fragment of it.
+     */
+    private String mapJudgeCoordinate(String value, List<ComparisonResult> completed) {
+        if (value == null || value.isBlank()) return value;
+        String v = value.trim();
+        // 1) exact raw coordinate
+        for (ComparisonResult r : completed) {
+            if (v.equals(r.getSkillCoordinate())) return r.getSkillCoordinate();
+        }
+        // 2) judge echoed the full "[N] coord — name" label (the coord is a substring)
+        for (ComparisonResult r : completed) {
+            if (v.contains(r.getSkillCoordinate())) return r.getSkillCoordinate();
+        }
+        // 3) strip a leading "[N] " and trailing " — name", then retry exact
+        String stripped = v;
+        if (stripped.startsWith("[")) {
+            int close = stripped.indexOf("] ");
+            if (close > 0) stripped = stripped.substring(close + 2).trim();
+        }
+        int dash = stripped.indexOf(" — ");
+        if (dash > 0) stripped = stripped.substring(0, dash).trim();
+        for (ComparisonResult r : completed) {
+            if (stripped.equals(r.getSkillCoordinate())) return r.getSkillCoordinate();
+        }
+        return value.trim();
+    }
+
     private List<ComparisonRun.SkillSpec> resolveSkillSpecs(List<String> coordinates) {
         List<ComparisonRun.SkillSpec> specs = new ArrayList<>();
         for (String coord : coordinates) {
             if ("baseline".equals(coord)) {
                 specs.add(new ComparisonRun.SkillSpec(
                         "baseline", "基准参照 (Baseline)", "—",
-                        DirectApiSkillExecutor.BASELINE_PROMPT));
-                continue;
-            }
-
-            if (coord.startsWith("catalog:")) {
-                String catalogId = coord.substring("catalog:".length());
-                for (CatalogEntry entry : catalogs.values()) {
-                    for (CatalogSkill cs : entry.skills()) {
-                        if (cs.id().equals(catalogId)) {
-                            String prompt = !cs.approach().isBlank()
-                                    ? cs.approach()
-                                    : cs.summaryZh();
-                            if (prompt.isBlank()) {
-                                prompt = cs.name();
-                            }
-                            specs.add(new ComparisonRun.SkillSpec(
-                                    coord, cs.name(), "catalog", prompt));
-                            break;
-                        }
-                    }
-                }
+                        DirectApiSkillExecutor.BASELINE_PROMPT, null));
                 continue;
             }
 
@@ -524,7 +577,7 @@ public class ForkprobeComparisonService {
                 try {
                     String prompt = loadSkillHubPrompt(parts[0], parts[1]);
                     specs.add(new ComparisonRun.SkillSpec(
-                            coord, parts[1], parts[0], prompt));
+                            coord, parts[1], parts[0], prompt, null));
                 } catch (Exception e) {
                     log.warn("Failed to load SKILL.md for {}/{}: {}", parts[0], parts[1], e.getMessage());
                 }
@@ -561,37 +614,10 @@ public class ForkprobeComparisonService {
         return trimmed;
     }
 
-    private String matchDomain(String taskDescription) {
-        String lower = taskDescription.toLowerCase();
-        // Simple keyword → domain mapping
-        if (containsAny(lower, "academic", "paper", "论文", "学术", "科研", "摘要", "润色",
-                "ai味", "ai flavor", "sci", "anti-ai")) {
-            return "academic-writing";
-        }
-        if (containsAny(lower, "ppt", "幻灯片", "presentation", "演示")) {
-            return "pptx-artifact";
-        }
-        if (containsAny(lower, "web", "网页", "landing", "dashboard", "前端", "网站")) {
-            return "web-artifact";
-        }
-        if (containsAny(lower, "video", "视频", "宣传片", "口播", "motion", "动画")) {
-            return "video-artifact";
-        }
-        // Default to first loaded catalog
-        return catalogs.keySet().iterator().next();
-    }
-
-    private static boolean containsAny(String text, String... keywords) {
-        for (String kw : keywords) {
-            if (text.contains(kw)) return true;
-        }
-        return false;
-    }
-
     private RecommendedSkill baselineSkill() {
         return new RecommendedSkill(
                 "baseline", "基准参照 (Baseline)", "—",
-                "不加载任何 skill 的原始模型输出，作为对比基准", "baseline", "baseline", 0);
+                "不加载任何 skill 的原始模型输出，作为对比基准", "baseline", "baseline", 0, null);
     }
 
     private void cleanupStaleComparisons() {
@@ -609,10 +635,4 @@ public class ForkprobeComparisonService {
         }
     }
 
-    // --- Internal types ---
-
-    record CatalogEntry(String domain, String description, List<CatalogSkill> skills) {}
-
-    record CatalogSkill(String id, String name, String author, String category,
-                       String approach, String notes, String summaryZh) {}
 }

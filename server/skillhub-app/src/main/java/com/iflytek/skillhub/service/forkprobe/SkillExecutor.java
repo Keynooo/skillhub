@@ -2,6 +2,8 @@ package com.iflytek.skillhub.service.forkprobe;
 
 import com.iflytek.skillhub.service.AnthropicService;
 
+import java.util.function.BooleanSupplier;
+
 /**
  * Executes a single skill against a task description within the comparison sandbox.
  * <p>
@@ -16,9 +18,12 @@ interface SkillExecutor {
      * @param skillSystemPrompt the SKILL.md body content (or baseline default prompt)
      * @param taskDescription   the user's task description
      * @param skillName         display name for logging/error context
+     * @param cancelled         supplies {@code true} once the owning comparison run has been
+     *                          cancelled; executors should stop promptly and destroy any process
      * @return the execution result
      */
-    SkillResult execute(String skillSystemPrompt, String taskDescription, String skillName);
+    SkillResult execute(String skillSystemPrompt, String taskDescription, String skillName,
+                        BooleanSupplier cancelled);
 
     /**
      * Verify whether the skill's methodology was actually applied in the output.

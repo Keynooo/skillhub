@@ -6,14 +6,19 @@ import com.iflytek.skillhub.domain.shared.exception.DomainForbiddenException;
 import com.iflytek.skillhub.domain.skill.Skill;
 import com.iflytek.skillhub.domain.skill.SkillRepository;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class SkillLabelService {
+
+    private static final Logger log = LoggerFactory.getLogger(SkillLabelService.class);
 
     private final int maxLabelsPerSkill;
 
@@ -36,6 +41,13 @@ public class SkillLabelService {
 
     public List<SkillLabel> listSkillLabels(Long skillId) {
         return skillLabelRepository.findBySkillId(skillId);
+    }
+
+    public List<SkillLabel> listSkillLabelsBySkillIds(List<Long> skillIds) {
+        if (skillIds == null || skillIds.isEmpty()) {
+            return List.of();
+        }
+        return skillLabelRepository.findBySkillIdIn(skillIds);
     }
 
     public List<SkillLabel> listByLabelId(Long labelId) {
@@ -73,6 +85,48 @@ public class SkillLabelService {
         SkillLabel skillLabel = skillLabelRepository.findBySkillIdAndLabelId(skillId, labelDefinition.getId())
                 .orElseThrow(() -> new DomainBadRequestException("label.skill.not_found", skillId, labelSlug));
         skillLabelRepository.delete(skillLabel);
+    }
+
+    /**
+     * System-level auto-tagging entry point used by the LLM labeling pipeline.
+     *
+     * <p>Unlike {@link #attachLabel}, this bypasses {@link LabelPermissionChecker} and does not
+     * require the skill to resolve — it is called with a skill id that is already known to exist.
+     * Unknown or malformed slugs are skipped rather than rejected so a bad model output can never
+     * fail the tagging task; the caller (background consumer) simply persists whatever is valid.
+     *
+     * @return number of labels actually attached
+     */
+    @Transactional
+    public int autoTag(Long skillId, List<String> labelSlugs, String operatorId) {
+        if (labelSlugs == null || labelSlugs.isEmpty()) {
+            return 0;
+        }
+        List<SkillLabel> existing = skillLabelRepository.findBySkillId(skillId);
+        int added = 0;
+        for (String slug : labelSlugs) {
+            if (slug == null || slug.isBlank()) {
+                continue;
+            }
+            if (existing.size() + added >= maxLabelsPerSkill) {
+                break;
+            }
+            String normalizedSlug = slug.trim().toLowerCase(Locale.ROOT);
+            LabelDefinition definition = labelDefinitionRepository.findBySlugIgnoreCase(normalizedSlug).orElse(null);
+            if (definition == null) {
+                log.debug("Skipping unknown label slug during auto-tag: skillId={}, slug={}", skillId, slug);
+                continue;
+            }
+            boolean alreadyAttached = existing.stream()
+                    .anyMatch(label -> label.getLabelId().equals(definition.getId()));
+            if (alreadyAttached) {
+                continue;
+            }
+            skillLabelRepository.save(new SkillLabel(skillId, definition.getId(), operatorId));
+            added++;
+        }
+        log.info("Auto-tagged skill: skillId={}, attached={}", skillId, added);
+        return added;
     }
 
     private Skill findSkill(Long skillId) {

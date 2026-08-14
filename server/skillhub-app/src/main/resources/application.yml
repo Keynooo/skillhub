@@ -99,6 +99,7 @@ skillhub:
   anthropic:
     api-key: ${ANTHROPIC_API_KEY:}
     model: ${ANTHROPIC_MODEL:claude-haiku-4-5-20251001}
+    judge-model: ${ANTHROPIC_JUDGE_MODEL:}
     max-tokens: ${ANTHROPIC_MAX_TOKENS:4096}
     base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
     timeout-seconds: 120
@@ -107,7 +108,7 @@ skillhub:
     max-skills: 3
     max-skills-cap: 5
     comparison-ttl-minutes: 30
-    review-max-tokens: 1024
+    review-max-tokens: 4096
     executor:
       mode: ${SKILLHUB_FORKPROBE_EXECUTOR_MODE:direct-api}
       claude-cli-path: ${SKILLHUB_FORKPROBE_EXECUTOR_CLAUDE_CLI_PATH:claude}
@@ -116,6 +117,13 @@ skillhub:
       effort: ${SKILLHUB_FORKPROBE_EXECUTOR_EFFORT:low}
       model: ${SKILLHUB_FORKPROBE_EXECUTOR_MODEL:}
       dangerously-skip-permissions: ${SKILLHUB_FORKPROBE_EXECUTOR_DANGEROUSLY_SKIP_PERMISSIONS:true}
+      sandbox-image: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_IMAGE:skillhub-sandbox:latest}
+      sandbox-network: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_NETWORK:bridge}
+      sandbox-memory: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_MEMORY:512m}
+      sandbox-cpus: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_CPUS:1.0}
+      sandbox-pids-limit: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_PIDS_LIMIT:256}
+      sandbox-user: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_USER:65534:65534}
+      sandbox-max-concurrency: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_MAX_CONCURRENCY:4}
   redis:
     sentinel:
       check-sentinels-list: ${SKILLHUB_REDIS_SENTINEL_CHECK_SENTINELS_LIST:true}
@@ -156,6 +164,16 @@ skillhub:
   label:
     max-definitions: ${SKILLHUB_LABEL_MAX_DEFINITIONS:100}
     max-per-skill: ${SKILLHUB_LABEL_MAX_PER_SKILL:10}
+    auto-tagging:
+      enabled: ${SKILLHUB_LABEL_AUTOTAGGING_ENABLED:false}
+      backfill-on-startup: ${SKILLHUB_LABEL_AUTOTAGGING_BACKFILL:false}
+      stream:
+        key: ${SKILLHUB_LABEL_STREAM_KEY:skillhub:label:requests}
+        group: ${SKILLHUB_LABEL_STREAM_GROUP:skillhub-labelers}
+        reclaim-enabled: ${SKILLHUB_LABEL_STREAM_RECLAIM_ENABLED:true}
+        reclaim-min-idle: ${SKILLHUB_LABEL_STREAM_RECLAIM_MIN_IDLE:PT2M}
+        reclaim-batch-size: ${SKILLHUB_LABEL_STREAM_RECLAIM_BATCH_SIZE:20}
+        reclaim-interval: ${SKILLHUB_LABEL_STREAM_RECLAIM_INTERVAL:PT30S}
   search:
     engine: postgres
     rebuild-on-startup: false
@@ -191,7 +209,7 @@ skillhub:
   security:
     scanner:
       enabled: ${SKILLHUB_SECURITY_SCANNER_ENABLED:true}
-      base-url: ${SKILLHUB_SECURITY_SCANNER_URL:http://localhost:8000}
+      base-url: ${SKILLHUB_SECURITY_SCANNER_URL:http://localhost:18000}
       health-path: /health
       scan-path: /scan-upload
       mode: ${SKILLHUB_SECURITY_SCANNER_MODE:local}

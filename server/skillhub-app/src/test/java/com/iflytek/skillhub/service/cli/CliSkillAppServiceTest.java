@@ -16,6 +16,7 @@ import com.iflytek.skillhub.domain.skill.service.SkillLifecycleProjectionService
 import com.iflytek.skillhub.domain.skill.service.SkillPublishService;
 import com.iflytek.skillhub.domain.skill.service.SkillQueryService;
 import com.iflytek.skillhub.domain.skill.validation.PackageEntry;
+import com.iflytek.skillhub.domain.user.UserAccountRepository;
 import com.iflytek.skillhub.dto.SkillLifecycleVersionResponse;
 import com.iflytek.skillhub.dto.SkillSummaryResponse;
 import com.iflytek.skillhub.dto.cli.CliDeleteResponse;
@@ -23,6 +24,7 @@ import com.iflytek.skillhub.dto.cli.CliPublishResponse;
 import com.iflytek.skillhub.dto.cli.CliResolveResponse;
 import com.iflytek.skillhub.service.AuditRequestContext;
 import com.iflytek.skillhub.service.SkillDeleteAppService;
+import com.iflytek.skillhub.service.SkillLabelAppService;
 import com.iflytek.skillhub.service.SkillSearchAppService;
 import com.iflytek.skillhub.search.SearchQuery;
 import com.iflytek.skillhub.search.SearchQueryService;
@@ -56,6 +58,8 @@ class CliSkillAppServiceTest {
     @Mock SkillVersionRepository skillVersionRepository;
     @Mock NamespaceService namespaceService;
     @Mock RbacService rbacService;
+    @Mock SkillLabelAppService skillLabelAppService;
+    @Mock UserAccountRepository userAccountRepository;
 
     private CliSkillAppService service;
 
@@ -75,7 +79,7 @@ class CliSkillAppServiceTest {
                         "global", Instant.now(), false,
                         new SkillLifecycleVersionResponse(1L, "1.2.0", "PUBLISHED"),
                         new SkillLifecycleVersionResponse(1L, "1.2.0", "PUBLISHED"),
-                        null, "PUBLISHED"
+                        null, "PUBLISHED", List.of(), null
                 )),
                 1L, 0, 20
         );
@@ -103,7 +107,7 @@ class CliSkillAppServiceTest {
                                 "global", Instant.now(), false,
                                 new SkillLifecycleVersionResponse(2L, "1.0.0", "PUBLISHED"),
                                 new SkillLifecycleVersionResponse(2L, "1.0.0", "PUBLISHED"),
-                                null, "PUBLISHED"
+                                null, "PUBLISHED", List.of(), null
                         )
                 ),
                 1L, 0, 20
@@ -163,7 +167,9 @@ class CliSkillAppServiceTest {
                 namespaceRepository,
                 namespaceService,
                 new SkillLifecycleProjectionService(skillVersionRepository),
-                rbacService
+                rbacService,
+                skillLabelAppService,
+                userAccountRepository
         );
         CliSkillAppService realService = new CliSkillAppService(
                 realSearchAppService,

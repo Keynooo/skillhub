@@ -59,10 +59,21 @@ public class AnthropicService {
     public AnthropicMessageResponse sendMessageWithRetry(
             String systemPrompt, String userMessage, int maxTokens, int attempt)
             throws IOException, InterruptedException {
+        return sendMessageWithRetry(systemPrompt, userMessage, maxTokens, attempt, null);
+    }
+
+    /**
+     * Send with automatic retry on transient failures and an optional model override.
+     * The override lets judge/verification calls use a fast non-reasoning model while
+     * skill execution keeps the main {@code model}.
+     */
+    public AnthropicMessageResponse sendMessageWithRetry(
+            String systemPrompt, String userMessage, int maxTokens, int attempt, String modelOverride)
+            throws IOException, InterruptedException {
 
         Instant start = Instant.now();
 
-        String requestBody = buildRequestBody(systemPrompt, userMessage, maxTokens);
+        String requestBody = buildRequestBody(systemPrompt, userMessage, maxTokens, modelOverride);
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(properties.getBaseUrl() + "/v1/messages"))
                 .header("x-api-key", properties.getApiKey())
@@ -78,7 +89,7 @@ public class AnthropicService {
         } catch (IOException | InterruptedException e) {
             if (attempt < properties.getMaxRetries()) {
                 log.warn("Anthropic API call failed (attempt {}), retrying: {}", attempt + 1, e.getMessage());
-                return sendMessageWithRetry(systemPrompt, userMessage, maxTokens, attempt + 1);
+                return sendMessageWithRetry(systemPrompt, userMessage, maxTokens, attempt + 1, modelOverride);
             }
             throw e;
         }
@@ -96,7 +107,7 @@ public class AnthropicService {
                     Thread.currentThread().interrupt();
                     throw ie;
                 }
-                return sendMessageWithRetry(systemPrompt, userMessage, maxTokens, attempt + 1);
+                return sendMessageWithRetry(systemPrompt, userMessage, maxTokens, attempt + 1, modelOverride);
             }
 
             throw new IOException(errorMsg);
@@ -130,7 +141,18 @@ public class AnthropicService {
                 "Did the AI actually apply the skill's methodology in the output? Answer YES or NO with one sentence evidence.",
                 skillName, approach, truncated);
 
-        return sendMessage(systemPrompt, userMessage, 256);
+        // Judge/verify tasks are deterministic — use the judge model (a fast
+        // non-reasoning model) when configured. Reasoning models burn the token
+        // budget on a "thinking" block and can return blank; use a larger budget
+        // and retry once blank so the verdict text has room to arrive.
+        int maxTokens = 1024;
+        String judgeModel = properties.getJudgeModel();
+        AnthropicMessageResponse response =
+                sendMessageWithRetry(systemPrompt, userMessage, maxTokens, 0, judgeModel);
+        for (int attempt = 0; attempt < 2 && (response.content() == null || response.content().isBlank()); attempt++) {
+            response = sendMessageWithRetry(systemPrompt, userMessage, maxTokens, 0, judgeModel);
+        }
+        return response;
     }
 
     /**
@@ -140,9 +162,10 @@ public class AnthropicService {
         return properties.isApiKeyConfigured();
     }
 
-    private String buildRequestBody(String systemPrompt, String userMessage, int maxTokens) {
+    private String buildRequestBody(String systemPrompt, String userMessage, int maxTokens, String modelOverride) {
         ObjectNode root = objectMapper.createObjectNode();
-        root.put("model", properties.getModel());
+        root.put("model", modelOverride != null && !modelOverride.isBlank()
+                ? modelOverride : properties.getModel());
         root.put("max_tokens", maxTokens);
 
         ArrayNode system = root.putArray("system");
@@ -163,14 +186,20 @@ public class AnthropicService {
         if (content == null || !content.isArray() || content.size() == 0) {
             return "";
         }
-        // Anthropic returns content as array of blocks; first text block
+        // Anthropic returns content as an array of blocks. Reasoning models emit a
+        // "thinking" block before one or more "text" blocks; concatenate every text
+        // block (skipping non-text) so a multi-block answer isn't truncated to just
+        // the first fragment.
+        StringBuilder sb = new StringBuilder();
         for (JsonNode block : content) {
             if ("text".equals(block.get("type").asText())) {
                 String text = block.get("text").asText();
-                return text != null ? text : "";
+                if (text != null) {
+                    sb.append(text);
+                }
             }
         }
-        return "";
+        return sb.toString();
     }
 
     private int extractTokens(JsonNode body) {

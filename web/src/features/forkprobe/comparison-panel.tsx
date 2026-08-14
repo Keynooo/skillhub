@@ -2,7 +2,7 @@
 
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { X, GitCompare, RefreshCw, AlertCircle, Sparkles, LogIn } from 'lucide-react'
+import { X, GitCompare, RefreshCw, AlertCircle, Sparkles, LogIn, Square } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/textarea'
@@ -36,6 +36,7 @@ export function ComparisonPanel() {
     handleToggleSkill,
     handleGetRecommendations,
     handleStartComparison,
+    handleCancelComparison,
     handleReset,
     recommendations,
     allSkills,
@@ -43,6 +44,7 @@ export function ComparisonPanel() {
     maxSelect,
     apiKeyOk,
     isStartingComparison,
+    isCancellingComparison,
   } = useForkprobeWorkbench({ preselectedSkills: preselectedSkill ? [preselectedSkill] : [] })
 
   // --- Derived ---
@@ -273,7 +275,19 @@ export function ComparisonPanel() {
 
           {/* Progress (RUNNING) */}
           {panelState === 'RUNNING' && statusDataForState && (
-            <ComparisonProgress results={statusDataForState.results} />
+            <>
+              <ComparisonProgress results={statusDataForState.results} />
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={handleCancelComparison}
+                disabled={isCancellingComparison}
+              >
+                <Square className="w-3.5 h-3.5 mr-1.5" />
+                {isCancellingComparison ? t('forkprobe.cancelling') : t('forkprobe.cancel')}
+              </Button>
+            </>
           )}
 
           {/* Results (COMPLETED) */}

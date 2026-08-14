@@ -10,6 +10,8 @@ export interface RecommendedSkill {
   domain: string
   source: string
   stars: number
+  /** GitHub source URL for catalog skills; null for SkillHub skills / baseline. */
+  sourceUrl: string | null
 }
 
 export interface RecommendResponse {
@@ -37,6 +39,8 @@ export interface CandidateResult {
   skillApplied: boolean | null
   appliedReason: string | null
   error: string | null
+  /** GitHub source URL for catalog skills; null for SkillHub skills / baseline. */
+  sourceUrl: string | null
 }
 
 export interface ReviewScore {
@@ -58,7 +62,7 @@ export interface ReviewResult {
 
 export interface ComparisonStatusResponse {
   comparisonId: string
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
   results: CandidateResult[]
   error: string | null
   startedAt: string | null
@@ -71,7 +75,32 @@ export interface ForkprobeConfig {
   maxSkills: number
   maxSkillsCap: number
   apiKeyConfigured: boolean
-  catalogDomains: string[]
+}
+
+// --- Link resolution ---
+
+export type SkillLinkTarget =
+  | { kind: 'detail'; namespace: string; slug: string }
+  | { kind: 'external'; href: string }
+  | null
+
+/**
+ * Resolve the follow-up action for a comparison candidate:
+ * - `baseline` or unknown → null (no page)
+ * - `catalog:<id>` + sourceUrl → external GitHub link
+ * - `namespace/slug` → SkillHub detail page
+ */
+export function resolveSkillLink(result: CandidateResult): SkillLinkTarget {
+  const coord = result.skillCoordinate
+  if (!coord || coord === 'baseline') return null
+  if (coord.startsWith('catalog:')) {
+    return result.sourceUrl ? { kind: 'external', href: result.sourceUrl } : null
+  }
+  const parts = coord.split('/')
+  if (parts.length === 2 && parts[0] && parts[1]) {
+    return { kind: 'detail', namespace: parts[0], slug: parts[1] }
+  }
+  return null
 }
 
 // --- API functions ---
@@ -104,6 +133,15 @@ export async function getComparisonStatus(
   comparisonId: string,
 ): Promise<ComparisonStatusResponse> {
   return fetchJson<ComparisonStatusResponse>(`${BASE}/compare/${encodeURIComponent(comparisonId)}`)
+}
+
+export async function cancelComparison(
+  comparisonId: string,
+): Promise<ComparisonStatusResponse> {
+  return fetchJson<ComparisonStatusResponse>(
+    `${BASE}/compare/${encodeURIComponent(comparisonId)}/cancel`,
+    { method: 'POST' },
+  )
 }
 
 export async function getForkprobeConfig(): Promise<ForkprobeConfig> {

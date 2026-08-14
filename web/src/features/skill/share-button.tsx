@@ -43,7 +43,7 @@ export function ShareButton({ namespace, slug, description }: ShareButtonProps) 
 
   return (
     <Button
-      className="w-full"
+      className="w-full gap-2"
       variant="outline"
       size="lg"
       data-testid="share-skill-button"

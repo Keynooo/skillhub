@@ -1,6 +1,7 @@
 package com.iflytek.skillhub.controller.portal;
 
 import com.iflytek.skillhub.controller.BaseApiController;
+import com.iflytek.skillhub.domain.namespace.NamespaceRole;
 import com.iflytek.skillhub.dto.ApiResponse;
 import com.iflytek.skillhub.dto.ApiResponseFactory;
 import com.iflytek.skillhub.dto.forkprobe.CompareRequest;
@@ -43,10 +44,15 @@ public class ForkprobeComparisonController extends BaseApiController {
      */
     @PostMapping("/recommend")
     @RateLimit(category = "forkprobe-recommend", authenticated = 30, anonymous = 10, windowSeconds = 60)
-    public ApiResponse<RecommendResponse> recommend(@RequestBody @Valid RecommendRequest request) {
+    public ApiResponse<RecommendResponse> recommend(
+            @RequestBody @Valid RecommendRequest request,
+            @RequestAttribute(value = "userId", required = false) String userId,
+            @RequestAttribute(value = "userNsRoles", required = false) Map<Long, NamespaceRole> userNsRoles) {
         List<RecommendedSkill> candidates = comparisonService.recommend(
                 request.taskDescription(),
-                request.maxCandidates());
+                request.maxCandidates(),
+                userId,
+                userNsRoles);
         return ok("response.success.read", new RecommendResponse(candidates));
     }
 
@@ -76,6 +82,22 @@ public class ForkprobeComparisonController extends BaseApiController {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(ok("response.success.read", status.get()));
+    }
+
+    /**
+     * Cancel an in-flight comparison run. Returns 404 if the comparison no longer
+     * exists (already expired). Idempotent — cancelling an already-finished run
+     * is a no-op.
+     */
+    @PostMapping("/compare/{comparisonId}/cancel")
+    public ResponseEntity<ApiResponse<ComparisonStatusResponse>> cancel(
+            @PathVariable String comparisonId) {
+        boolean exists = comparisonService.cancelComparison(comparisonId);
+        if (!exists) {
+            return ResponseEntity.notFound().build();
+        }
+        Optional<ComparisonStatusResponse> status = comparisonService.getStatus(comparisonId);
+        return ResponseEntity.ok(ok("response.success.update", status.orElse(null)));
     }
 
     /**

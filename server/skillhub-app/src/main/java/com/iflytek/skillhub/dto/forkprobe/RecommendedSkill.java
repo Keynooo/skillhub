@@ -23,5 +23,8 @@ public record RecommendedSkill(
         String source,
 
         /** Approximate GitHub stars (0 for non-GitHub skills). */
-        int stars
+        int stars,
+
+        /** GitHub source URL for catalog skills; null for SkillHub skills / baseline. */
+        String sourceUrl
 ) {}

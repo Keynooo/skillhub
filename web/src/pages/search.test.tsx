@@ -133,7 +133,7 @@ describe('SearchPage', () => {
     useSearchMock.mockReturnValue({
       q: 'agent',
       namespace: 'team-ai',
-      label: 'code-generation',
+      labels: ['code-generation'],
       sort: 'downloads',
       page: 1,
       starredOnly: false,
@@ -168,7 +168,25 @@ describe('SearchPage', () => {
       search: {
         q: 'agent',
         namespace: 'team-ai',
-        label: '',
+        labels: [],
+        sort: 'downloads',
+        page: 0,
+        starredOnly: false,
+      },
+    })
+  })
+
+  it('adds a second label to the selection instead of replacing the first', () => {
+    renderToStaticMarkup(<SearchPage />)
+
+    findButton('Official').onClick?.()
+
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/search',
+      search: {
+        q: 'agent',
+        namespace: 'team-ai',
+        labels: ['code-generation', 'official'],
         sort: 'downloads',
         page: 0,
         starredOnly: false,
@@ -186,7 +204,7 @@ describe('SearchPage', () => {
       search: {
         q: 'agent',
         namespace: 'team-ai',
-        label: 'code-generation',
+        labels: ['code-generation'],
         sort: 'newest',
         page: 0,
         starredOnly: false,
@@ -205,7 +223,7 @@ describe('SearchPage', () => {
       search: {
         q: 'agent',
         namespace: 'team-ai',
-        label: 'code-generation',
+        labels: ['code-generation'],
         sort: 'downloads',
         page: 2,
         starredOnly: false,
@@ -216,7 +234,7 @@ describe('SearchPage', () => {
       search: {
         q: 'agent',
         namespace: 'team-ai',
-        label: 'code-generation',
+        labels: ['code-generation'],
         sort: 'downloads',
         page: 0,
         starredOnly: true,
@@ -230,7 +248,7 @@ describe('SearchPage', () => {
     expect(searchSkillParams[0]).toMatchObject({
       q: 'agent',
       namespace: 'team-ai',
-      label: 'code-generation',
+      labels: ['code-generation'],
       sort: 'downloads',
       page: 1,
       size: 12,
@@ -247,7 +265,7 @@ describe('SearchPage', () => {
       search: {
         q: 'onboarding',
         namespace: 'product-team',
-        label: 'code-generation',
+        labels: ['code-generation'],
         sort: 'downloads',
         page: 0,
         starredOnly: false,
@@ -259,7 +277,7 @@ describe('SearchPage', () => {
   it('renders the default skill list when the empty query still returns items', () => {
     useSearchMock.mockReturnValue({
       q: '',
-      label: '',
+      labels: [],
       sort: 'newest',
       page: 0,
       starredOnly: false,
@@ -284,7 +302,7 @@ describe('SearchPage', () => {
   it('shows a generic empty state when the default discovery list is empty', () => {
     useSearchMock.mockReturnValue({
       q: '',
-      label: '',
+      labels: [],
       sort: 'newest',
       page: 0,
       starredOnly: false,

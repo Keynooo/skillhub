@@ -6,11 +6,18 @@ describe('buildSkillSearchUrl', () => {
     expect(buildSkillSearchUrl({
       q: '  hello world  ',
       namespace: '@team-ai',
-      label: 'code-generation',
+      labels: ['code-generation'],
       sort: 'relevance',
       page: 2,
       size: 12,
     })).toBe('/api/web/skills?q=hello+world&namespace=team-ai&label=code-generation&sort=relevance&page=2&size=12')
+  })
+
+  it('appends one label param per selected slug for multi-select filtering', () => {
+    expect(buildSkillSearchUrl({
+      q: 'demo',
+      labels: ['code-generation', 'official'],
+    })).toBe('/api/web/skills?q=demo&label=code-generation&label=official')
   })
 
   it('returns the base skills endpoint when no search params are provided', () => {
