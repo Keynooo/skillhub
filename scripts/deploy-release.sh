@@ -62,20 +62,6 @@ sed -i \
   -e "s|^API_PORT=.*|API_PORT=8080|" \
   .env.release
 
-cat >> .env.release <<'SMTP_EOF'
-# QQ 邮箱 SMTP（忘记密码邮件发送）
-SPRING_MAIL_HOST=smtp.qq.com
-SPRING_MAIL_PORT=465
-SPRING_MAIL_USERNAME=641563099@qq.com
-SPRING_MAIL_PASSWORD=vfjensncobdrbdib
-SPRING_MAIL_SMTP_AUTH=true
-SPRING_MAIL_SMTP_STARTTLS_ENABLE=false
-SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE=true
-SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_TRUST=smtp.qq.com
-SKILLHUB_AUTH_PASSWORD_RESET_FROM_ADDRESS=641563099@qq.com
-SKILLHUB_AUTH_PASSWORD_RESET_FROM_NAME=SkillHub
-SMTP_EOF
-
 echo "==> 3/4 校验配置"
 if ! ./scripts/validate-release-config.sh .env.release; then
   echo "❌ 配置校验失败，请按提示修改 .env.release 后重跑 docker compose up" >&2
