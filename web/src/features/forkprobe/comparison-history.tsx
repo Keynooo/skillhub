@@ -40,9 +40,9 @@ export function ComparisonHistory({
   onClose: () => void
 }) {
   const { data: history, isLoading } = useForkprobeHistory(20, open)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedItem, setSelectedItem] = useState<ComparisonHistoryItem | null>(null)
   const { data: detail, isLoading: detailLoading } = useForkprobeHistoryDetail(
-    open ? selectedId : null,
+    open ? (selectedItem?.comparisonId ?? null) : null,
   )
 
   if (!open) return null
@@ -65,9 +65,9 @@ export function ComparisonHistory({
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
             <div className="flex items-center gap-2 min-w-0">
-              {selectedId && (
+              {selectedItem && (
                 <button
-                  onClick={() => setSelectedId(null)}
+                  onClick={() => setSelectedItem(null)}
                   className="p-1.5 rounded-lg hover:bg-secondary transition-colors"
                   aria-label="返回列表"
                 >
@@ -76,7 +76,7 @@ export function ComparisonHistory({
               )}
               <History className="w-5 h-5 text-primary shrink-0" />
               <h2 className="text-lg font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
-                {selectedId ? '历史详情' : '历史记录'}
+                {selectedItem ? '历史详情' : '历史记录'}
               </h2>
             </div>
             <button
@@ -90,14 +90,14 @@ export function ComparisonHistory({
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto px-5 py-4">
-            {!selectedId ? (
+            {!selectedItem ? (
               <HistoryList
                 history={history}
                 isLoading={isLoading}
-                onSelect={setSelectedId}
+                onSelect={setSelectedItem}
               />
             ) : (
-              <HistoryDetail detail={detail} isLoading={detailLoading} />
+              <HistoryDetail item={selectedItem} detail={detail} isLoading={detailLoading} />
             )}
           </div>
         </div>
@@ -113,7 +113,7 @@ function HistoryList({
 }: {
   history: ComparisonHistoryItem[] | undefined
   isLoading: boolean
-  onSelect: (comparisonId: string) => void
+  onSelect: (item: ComparisonHistoryItem) => void
 }) {
   if (isLoading) {
     return (
@@ -142,7 +142,7 @@ function HistoryList({
           <li key={item.comparisonId}>
             <button
               type="button"
-              onClick={() => onSelect(item.comparisonId)}
+              onClick={() => onSelect(item)}
               className="w-full text-left px-4 py-3 rounded-xl border hover:bg-muted/50 transition-colors"
               style={{ borderColor: 'hsl(var(--border))' }}
             >
@@ -181,9 +181,11 @@ function HistoryList({
 }
 
 function HistoryDetail({
+  item,
   detail,
   isLoading,
 }: {
+  item: ComparisonHistoryItem
   detail: ComparisonStatusResponse | undefined
   isLoading: boolean
 }) {
@@ -208,13 +210,17 @@ function HistoryDetail({
 
   return (
     <div className="space-y-4">
-      <div
-        className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-secondary"
-        style={{ color: 'hsl(var(--muted-foreground))' }}
-      >
+      {/* Task description + status */}
+      <div className="flex items-start justify-between gap-3">
+        <h3
+          className="text-base font-semibold leading-snug"
+          style={{ color: 'hsl(var(--foreground))' }}
+        >
+          {item.taskDescription}
+        </h3>
         <span
           className={cn(
-            'px-1.5 py-0.5 rounded-full font-medium',
+            'shrink-0 px-2 py-0.5 rounded-full text-xs font-medium',
             isFailed && 'bg-red-100 text-red-600',
             isCancelled && 'bg-gray-100 text-gray-500',
             !isFailed && !isCancelled && 'bg-emerald-100 text-emerald-700',
@@ -222,8 +228,11 @@ function HistoryDetail({
         >
           {STATUS_LABELS[detail.status] ?? detail.status}
         </span>
-        <span>{detail.results.length} 个技能</span>
-        {detail.completedAt && <span>· {formatTime(detail.completedAt)}</span>}
+      </div>
+
+      <div className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+        {detail.results.length} 个技能
+        {detail.completedAt && <span> · {formatTime(detail.completedAt)}</span>}
       </div>
 
       {detail.error && (
