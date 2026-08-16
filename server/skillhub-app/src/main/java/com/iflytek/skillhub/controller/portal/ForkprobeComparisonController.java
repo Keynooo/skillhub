@@ -64,7 +64,8 @@ public class ForkprobeComparisonController extends BaseApiController {
     public ApiResponse<CompareResponse> compare(@RequestBody @Valid CompareRequest request) {
         CompareResponse response = comparisonService.startComparison(
                 request.taskDescription(),
-                request.skillCoordinates());
+                request.skillCoordinates(),
+                request.provider());
         return ok("response.success.create", response);
     }
 

@@ -49,7 +49,7 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
 
     @Override
     public SkillResult execute(String skillSystemPrompt, String taskDescription, String skillName,
-                               BooleanSupplier cancelled) {
+                               BooleanSupplier cancelled, LlmTarget target) {
         Instant start = Instant.now();
         Path workspace = null;
         try {
@@ -59,7 +59,7 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
             String prompt = buildTaskPrompt(taskDescription, skillName);
             Path stdoutFile = Files.createTempFile(workspace, "claude-out-", ".json");
 
-            Process process = startProcess(workspace, stdoutFile);
+            Process process = startProcess(workspace, stdoutFile, target);
             try (OutputStream stdin = process.getOutputStream()) {
                 stdin.write(prompt.getBytes(StandardCharsets.UTF_8));
             }
@@ -126,7 +126,7 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
         }
     }
 
-    private Process startProcess(Path workspace, Path stdoutFile) throws IOException {
+    private Process startProcess(Path workspace, Path stdoutFile, LlmTarget target) throws IOException {
         List<String> command = new ArrayList<>();
         if (IS_WINDOWS) {
             command.add("cmd");
@@ -146,12 +146,25 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
         if (properties.isDangerouslySkipPermissions()) {
             command.add("--dangerously-skip-permissions");
         }
-        if (properties.getModel() != null && !properties.getModel().isBlank()) {
+        // Per-run model override wins; otherwise fall back to the executor-level model.
+        String cliModel = (target != null && target.model() != null && !target.model().isBlank())
+                ? target.model() : properties.getModel();
+        if (cliModel != null && !cliModel.isBlank()) {
             command.add("--model");
-            command.add(properties.getModel());
+            command.add(cliModel);
         }
 
         ProcessBuilder pb = new ProcessBuilder(command);
+        // Per-run provider override: point the subprocess at a different
+        // Anthropic-compatible endpoint + key, matching what direct-api does.
+        if (target != null) {
+            if (target.baseUrl() != null && !target.baseUrl().isBlank()) {
+                pb.environment().put("ANTHROPIC_BASE_URL", target.baseUrl());
+            }
+            if (target.apiKey() != null && !target.apiKey().isBlank()) {
+                pb.environment().put("ANTHROPIC_API_KEY", target.apiKey());
+            }
+        }
         // Run the CLI inside the throwaway workspace so that the prompt's
         // "当前工作目录里的 SKILL.md" is resolvable, and any files the skill
         // writes land in the workspace (cleaned up) rather than the server's cwd.

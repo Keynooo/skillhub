@@ -68,7 +68,7 @@ class DockerSandboxSkillExecutor implements SkillExecutor {
 
     @Override
     public SkillResult execute(String skillSystemPrompt, String taskDescription, String skillName,
-                               BooleanSupplier cancelled) {
+                               BooleanSupplier cancelled, LlmTarget target) {
         if (cancelled.getAsBoolean()) {
             return new SkillResult("", 0, 0, "已取消");
         }
@@ -92,7 +92,7 @@ class DockerSandboxSkillExecutor implements SkillExecutor {
             }
 
             try {
-                Process process = startProcess(skillDir, stdoutFile);
+                Process process = startProcess(skillDir, stdoutFile, target);
                 try (OutputStream stdin = process.getOutputStream()) {
                     stdin.write(prompt.getBytes(StandardCharsets.UTF_8));
                 }
@@ -158,8 +158,8 @@ class DockerSandboxSkillExecutor implements SkillExecutor {
         }
     }
 
-    private Process startProcess(Path skillDir, Path stdoutFile) throws IOException {
-        List<String> command = buildDockerCommand(skillDir);
+    private Process startProcess(Path skillDir, Path stdoutFile, LlmTarget target) throws IOException {
+        List<String> command = buildDockerCommand(skillDir, target);
         if (IS_WINDOWS) {
             List<String> wrapped = new ArrayList<>();
             wrapped.add("cmd");
@@ -178,6 +178,14 @@ class DockerSandboxSkillExecutor implements SkillExecutor {
      * test can assert every isolation flag is present.
      */
     List<String> buildDockerCommand(Path skillDir) {
+        return buildDockerCommand(skillDir, null);
+    }
+
+    /**
+     * Build the full {@code docker run ...} argument list, applying a per-run target
+     * override (base URL / API key / model) that wins over the executor-level config.
+     */
+    List<String> buildDockerCommand(Path skillDir, LlmTarget target) {
         List<String> cmd = new ArrayList<>();
         cmd.add("docker");
         cmd.add("run");
@@ -204,20 +212,27 @@ class DockerSandboxSkillExecutor implements SkillExecutor {
         cmd.add(properties.getSandboxNetwork());
         cmd.add("-e");
         cmd.add("HOME=/tmp");
-        if (anthropicProperties.getBaseUrl() != null && !anthropicProperties.getBaseUrl().isBlank()) {
+        // Per-run provider override wins over the deployment default.
+        String baseUrl = target != null && target.baseUrl() != null && !target.baseUrl().isBlank()
+                ? target.baseUrl() : anthropicProperties.getBaseUrl();
+        if (baseUrl != null && !baseUrl.isBlank()) {
             cmd.add("-e");
-            cmd.add("ANTHROPIC_BASE_URL=" + anthropicProperties.getBaseUrl());
+            cmd.add("ANTHROPIC_BASE_URL=" + baseUrl);
         }
-        if (anthropicProperties.getApiKey() != null && !anthropicProperties.getApiKey().isBlank()) {
+        String apiKey = target != null && target.apiKey() != null && !target.apiKey().isBlank()
+                ? target.apiKey() : anthropicProperties.getApiKey();
+        if (apiKey != null && !apiKey.isBlank()) {
             cmd.add("-e");
-            cmd.add("ANTHROPIC_API_KEY=" + anthropicProperties.getApiKey());
+            cmd.add("ANTHROPIC_API_KEY=" + apiKey);
         }
         // Forward the model so the CLI inside the container targets the same LLM as the
         // rest of the app (e.g. deepseek-v4-pro on the Anthropic-compatible endpoint). A
         // non-blank forkprobe executor `model` override (--model flag below) still wins.
-        if (anthropicProperties.getModel() != null && !anthropicProperties.getModel().isBlank()) {
+        String model = target != null && target.model() != null && !target.model().isBlank()
+                ? target.model() : anthropicProperties.getModel();
+        if (model != null && !model.isBlank()) {
             cmd.add("-e");
-            cmd.add("ANTHROPIC_MODEL=" + anthropicProperties.getModel());
+            cmd.add("ANTHROPIC_MODEL=" + model);
         }
         cmd.add("-v");
         cmd.add(skillDir.toAbsolutePath() + ":/skill:ro");
@@ -238,9 +253,11 @@ class DockerSandboxSkillExecutor implements SkillExecutor {
         if (properties.isDangerouslySkipPermissions()) {
             cmd.add("--dangerously-skip-permissions");
         }
-        if (properties.getModel() != null && !properties.getModel().isBlank()) {
+        String cliModel = (target != null && target.model() != null && !target.model().isBlank())
+                ? target.model() : properties.getModel();
+        if (cliModel != null && !cliModel.isBlank()) {
             cmd.add("--model");
-            cmd.add(properties.getModel());
+            cmd.add(cliModel);
         }
         return cmd;
     }

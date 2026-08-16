@@ -36,14 +36,21 @@ class DirectApiSkillExecutor implements SkillExecutor {
 
     @Override
     public SkillResult execute(String skillSystemPrompt, String taskDescription, String skillName,
-                               BooleanSupplier cancelled) {
+                               BooleanSupplier cancelled, LlmTarget target) {
         if (cancelled.getAsBoolean()) {
             return new SkillResult("", 0, 0, "已取消");
         }
         Instant start = Instant.now();
         try {
-            AnthropicMessageResponse response = anthropicService.sendMessageWithRetry(
-                    skillSystemPrompt, taskDescription, maxTokens, 0);
+            AnthropicMessageResponse response;
+            if (target == null || !target.hasAny()) {
+                response = anthropicService.sendMessageWithRetry(
+                        skillSystemPrompt, taskDescription, maxTokens, 0);
+            } else {
+                response = anthropicService.sendMessageWithRetry(
+                        skillSystemPrompt, taskDescription, maxTokens, 0,
+                        target.model(), target.baseUrl(), target.apiKey());
+            }
             return new SkillResult(response.content(), response.tokensUsed(), response.latencySeconds(), null);
         } catch (Exception e) {
             log.warn("Skill execution failed for '{}': {}", skillName, e.getMessage());

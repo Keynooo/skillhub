@@ -21,6 +21,8 @@ export interface RecommendResponse {
 export interface CompareRequest {
   taskDescription: string
   skillCoordinates: string[]
+  /** Optional per-run provider id. Omit/empty to use the configured default model. */
+  provider?: string
 }
 
 export interface CompareResponse {
@@ -71,10 +73,19 @@ export interface ComparisonStatusResponse {
   review: ReviewResult | null
 }
 
+export interface ForkprobeProvider {
+  id: string
+  model: string
+}
+
 export interface ForkprobeConfig {
   maxSkills: number
   maxSkillsCap: number
   apiKeyConfigured: boolean
+  /** The deployment's default model name (e.g. deepseek-v4-pro). */
+  defaultModel: string
+  /** Alternate LLM providers the user can select per run (empty model = unknown). */
+  providers: ForkprobeProvider[]
 }
 
 // --- Link resolution ---
@@ -121,11 +132,12 @@ export async function recommendSkills(
 export async function startComparison(
   taskDescription: string,
   skillCoordinates: string[],
+  provider?: string,
 ): Promise<CompareResponse> {
   return fetchJson<CompareResponse>(`${BASE}/compare`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ taskDescription, skillCoordinates }),
+    body: JSON.stringify({ taskDescription, skillCoordinates, provider }),
   })
 }
 

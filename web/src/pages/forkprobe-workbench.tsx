@@ -15,12 +15,32 @@ import {
 import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/shared/ui/select'
 import { cn } from '@/shared/lib/utils'
 import { useForkprobeWorkbench } from '@/features/forkprobe/use-forkprobe-workbench'
 import { SkillSearchBox } from '@/features/forkprobe/skill-search-box'
 import type { CandidateResult } from '@/features/forkprobe/forkprobe-api'
 import type { RecommendedSkill } from '@/features/forkprobe/forkprobe-api'
 import { resolveSkillLink } from '@/features/forkprobe/forkprobe-api'
+import { ForkprobeOutput } from '@/features/forkprobe/forkprobe-output'
+
+/** Friendly display names for the known providers; falls back to id. */
+const PROVIDER_LABELS: Record<string, string> = {
+  glm: 'GLM',
+  local: '本地 vLLM',
+  deepseek: 'DeepSeek',
+}
+
+function providerLabel(id: string, model: string): string {
+  const base = PROVIDER_LABELS[id] ?? id
+  return model ? `${base} · ${model}` : base
+}
 
 /**
  * Full-screen forkprobe comparison workbench — styled to match the
@@ -56,6 +76,9 @@ export function ForkprobeWorkbenchPage() {
     panelState,
     taskDescription,
     setTaskDescription,
+    provider,
+    setProvider,
+    config,
     selectedSkills,
     error,
     handleToggleSkill,
@@ -262,6 +285,33 @@ export function ForkprobeWorkbenchPage() {
               />
               <div className="text-xs text-right text-muted-foreground">
                 {taskLen} 字符{taskTooShort && taskLen > 0 && '（至少 3 个）'}
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="forkprobe-provider"
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  模型（可选）
+                </label>
+                <Select value={provider} onValueChange={setProvider}>
+                  <SelectTrigger id="forkprobe-provider" className="w-full">
+                    <SelectValue placeholder="选择模型" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="default">
+                      {providerLabel('deepseek', config?.defaultModel ?? '')}
+                    </SelectItem>
+                    {config?.providers.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {providerLabel(p.id, p.model)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  选择本次对比使用的模型，默认 DeepSeek。
+                </p>
               </div>
 
               <Button
@@ -596,12 +646,7 @@ export function ForkprobeWorkbenchPage() {
                     borderColor: 'hsl(var(--border))',
                   }}
                 >
-                  <div
-                    className="text-base leading-7 whitespace-pre-wrap max-w-[72ch]"
-                    style={{ color: 'hsl(var(--foreground))' }}
-                  >
-                    {activeResult.output}
-                  </div>
+                  <ForkprobeOutput content={activeResult.output} className="max-w-[72ch]" />
                 </div>
               ) : (
                 <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">

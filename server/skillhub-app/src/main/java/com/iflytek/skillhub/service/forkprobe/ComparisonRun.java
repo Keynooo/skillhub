@@ -28,6 +28,7 @@ class ComparisonRun {
     private volatile Status status;
     private volatile boolean cancelled;
     private final String taskDescription;
+    private final LlmTarget target;
     private final List<SkillSpec> skills;
     private final Map<String, ComparisonResult> results;
     private final Instant createdAt;
@@ -36,10 +37,11 @@ class ComparisonRun {
     private volatile String error;
     private volatile ReviewResult review;
 
-    ComparisonRun(String taskDescription, List<SkillSpec> skills) {
+    ComparisonRun(String taskDescription, LlmTarget target, List<SkillSpec> skills) {
         this.comparisonId = UUID.randomUUID().toString();
         this.status = Status.PENDING;
         this.taskDescription = taskDescription;
+        this.target = target;
         this.skills = List.copyOf(skills);
         this.results = new ConcurrentHashMap<>();
         this.createdAt = Instant.now();
@@ -81,6 +83,10 @@ class ComparisonRun {
 
     String getTaskDescription() {
         return taskDescription;
+    }
+
+    LlmTarget getTarget() {
+        return target;
     }
 
     List<SkillSpec> getSkills() {

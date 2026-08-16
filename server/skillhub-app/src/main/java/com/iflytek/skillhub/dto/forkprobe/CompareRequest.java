@@ -19,5 +19,12 @@ public record CompareRequest(
          */
         @NotEmpty(message = "至少需要选择一个 skill")
         @Size(max = 5, message = "一次最多对比 5 个 skill")
-        List<String> skillCoordinates
+        List<String> skillCoordinates,
+
+        /**
+         * Optional per-run provider id (e.g. {@code glm}, {@code local}) selected from
+         * the configured {@code skillhub.anthropic.providers} map. Blank/null or
+         * {@code "default"} means use the deployment's configured model.
+         */
+        String provider
 ) {}

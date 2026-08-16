@@ -70,13 +70,29 @@ public class AnthropicService {
     public AnthropicMessageResponse sendMessageWithRetry(
             String systemPrompt, String userMessage, int maxTokens, int attempt, String modelOverride)
             throws IOException, InterruptedException {
+        return sendMessageWithRetry(systemPrompt, userMessage, maxTokens, attempt, modelOverride, null, null);
+    }
+
+    /**
+     * Send with automatic retry and optional per-call model / base URL / API key
+     * overrides. The base URL and key overrides let a single comparison run target
+     * an alternate Anthropic-compatible provider (e.g. GLM or a local vLLM endpoint)
+     * without changing the deployment default.
+     */
+    public AnthropicMessageResponse sendMessageWithRetry(
+            String systemPrompt, String userMessage, int maxTokens, int attempt, String modelOverride,
+            String baseUrlOverride, String apiKeyOverride)
+            throws IOException, InterruptedException {
 
         Instant start = Instant.now();
 
+        String baseUrl = firstNonBlank(baseUrlOverride, properties.getBaseUrl());
+        String apiKey = firstNonBlank(apiKeyOverride, properties.getApiKey());
+
         String requestBody = buildRequestBody(systemPrompt, userMessage, maxTokens, modelOverride);
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(properties.getBaseUrl() + "/v1/messages"))
-                .header("x-api-key", properties.getApiKey())
+                .uri(URI.create(stripTrailingSlash(baseUrl) + "/v1/messages"))
+                .header("x-api-key", apiKey)
                 .header("anthropic-version", API_VERSION)
                 .header("content-type", "application/json")
                 .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
@@ -89,7 +105,8 @@ public class AnthropicService {
         } catch (IOException | InterruptedException e) {
             if (attempt < properties.getMaxRetries()) {
                 log.warn("Anthropic API call failed (attempt {}), retrying: {}", attempt + 1, e.getMessage());
-                return sendMessageWithRetry(systemPrompt, userMessage, maxTokens, attempt + 1, modelOverride);
+                return sendMessageWithRetry(systemPrompt, userMessage, maxTokens, attempt + 1,
+                        modelOverride, baseUrlOverride, apiKeyOverride);
             }
             throw e;
         }
@@ -107,7 +124,8 @@ public class AnthropicService {
                     Thread.currentThread().interrupt();
                     throw ie;
                 }
-                return sendMessageWithRetry(systemPrompt, userMessage, maxTokens, attempt + 1, modelOverride);
+                return sendMessageWithRetry(systemPrompt, userMessage, maxTokens, attempt + 1,
+                        modelOverride, baseUrlOverride, apiKeyOverride);
             }
 
             throw new IOException(errorMsg);
@@ -120,6 +138,17 @@ public class AnthropicService {
         int tokensUsed = extractTokens(body);
 
         return new AnthropicMessageResponse(content, tokensUsed, latency);
+    }
+
+    private static String firstNonBlank(String override, String fallback) {
+        return override != null && !override.isBlank() ? override : fallback;
+    }
+
+    private static String stripTrailingSlash(String url) {
+        if (url != null && url.endsWith("/")) {
+            return url.substring(0, url.length() - 1);
+        }
+        return url;
     }
 
     /**

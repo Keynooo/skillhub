@@ -21,6 +21,8 @@ export interface UseForkprobeWorkbenchReturn {
   panelState: PanelState
   taskDescription: string
   setTaskDescription: (value: string) => void
+  provider: string
+  setProvider: (value: string) => void
   selectedSkills: Set<string>
   comparisonId: string | null
   error: string | null
@@ -61,6 +63,7 @@ export function useForkprobeWorkbench(
 
   const [panelState, setPanelState] = useState<PanelState>('IDLE')
   const [taskDescription, setTaskDescription] = useState('')
+  const [provider, setProvider] = useState('default')
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set())
   const [comparisonId, setComparisonId] = useState<string | null>(null)
   const [recommendTask, setRecommendTask] = useState('')
@@ -188,13 +191,14 @@ export function useForkprobeWorkbench(
       const result = await startComparisonMutation.mutateAsync({
         taskDescription: taskDescription.trim(),
         skillCoordinates: Array.from(selectedSkills),
+        provider: provider && provider !== 'default' ? provider : undefined,
       })
       setComparisonId(result.comparisonId)
       setPanelState('RUNNING')
     } catch (e) {
       setError(e instanceof Error ? e.message : '启动对比失败')
     }
-  }, [selectedSkills, taskDescription, startComparisonMutation])
+  }, [selectedSkills, taskDescription, provider, startComparisonMutation])
 
   const handleCancelComparison = useCallback(async () => {
     if (!comparisonId) return
@@ -216,6 +220,8 @@ export function useForkprobeWorkbench(
     panelState,
     taskDescription,
     setTaskDescription,
+    provider,
+    setProvider,
     selectedSkills,
     comparisonId,
     error,

@@ -52,9 +52,13 @@ export function useForkprobeRecommend(taskDescription: string, enabled = true) {
 export function useStartComparison() {
   const queryClient = useQueryClient()
 
-  return useMutation<CompareResponse, Error, { taskDescription: string; skillCoordinates: string[] }>({
-    mutationFn: ({ taskDescription, skillCoordinates }) =>
-      startComparison(taskDescription, skillCoordinates),
+  return useMutation<
+    CompareResponse,
+    Error,
+    { taskDescription: string; skillCoordinates: string[]; provider?: string }
+  >({
+    mutationFn: ({ taskDescription, skillCoordinates, provider }) =>
+      startComparison(taskDescription, skillCoordinates, provider),
     onSuccess: () => {
       // Invalidate config in case limits changed
       queryClient.invalidateQueries({ queryKey: forkprobeKeys.config })

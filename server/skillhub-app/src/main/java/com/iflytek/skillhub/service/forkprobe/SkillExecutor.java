@@ -20,10 +20,12 @@ interface SkillExecutor {
      * @param skillName         display name for logging/error context
      * @param cancelled         supplies {@code true} once the owning comparison run has been
      *                          cancelled; executors should stop promptly and destroy any process
+     * @param target            optional per-run provider/model override; {@code null} or blank
+     *                          fields mean the executor's defaults
      * @return the execution result
      */
     SkillResult execute(String skillSystemPrompt, String taskDescription, String skillName,
-                        BooleanSupplier cancelled);
+                        BooleanSupplier cancelled, LlmTarget target);
 
     /**
      * Verify whether the skill's methodology was actually applied in the output.
