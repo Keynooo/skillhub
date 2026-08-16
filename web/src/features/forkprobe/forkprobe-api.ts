@@ -88,6 +88,17 @@ export interface ForkprobeConfig {
   providers: ForkprobeProvider[]
 }
 
+export interface ComparisonHistoryItem {
+  comparisonId: string
+  taskDescription: string
+  status: 'COMPLETED' | 'FAILED' | 'CANCELLED'
+  /** null = deployment default provider */
+  provider: string | null
+  skillCount: number
+  createdAt: string | null
+  completedAt: string | null
+}
+
 // --- Link resolution ---
 
 export type SkillLinkTarget =
@@ -158,4 +169,18 @@ export async function cancelComparison(
 
 export async function getForkprobeConfig(): Promise<ForkprobeConfig> {
   return fetchJson<ForkprobeConfig>(`${BASE}/config`)
+}
+
+export async function getComparisonHistory(
+  limit = 20,
+): Promise<ComparisonHistoryItem[]> {
+  return fetchJson<ComparisonHistoryItem[]>(`${BASE}/history?limit=${limit}`)
+}
+
+export async function getComparisonHistoryDetail(
+  comparisonId: string,
+): Promise<ComparisonStatusResponse> {
+  return fetchJson<ComparisonStatusResponse>(
+    `${BASE}/history/${encodeURIComponent(comparisonId)}`,
+  )
 }

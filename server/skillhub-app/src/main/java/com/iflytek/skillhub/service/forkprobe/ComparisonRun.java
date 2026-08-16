@@ -25,6 +25,8 @@ class ComparisonRun {
     }
 
     private final String comparisonId;
+    private final String userId;
+    private final String providerId;
     private volatile Status status;
     private volatile boolean cancelled;
     private final String taskDescription;
@@ -37,14 +39,24 @@ class ComparisonRun {
     private volatile String error;
     private volatile ReviewResult review;
 
-    ComparisonRun(String taskDescription, LlmTarget target, List<SkillSpec> skills) {
+    ComparisonRun(String userId, String providerId, String taskDescription, LlmTarget target, List<SkillSpec> skills) {
         this.comparisonId = UUID.randomUUID().toString();
+        this.userId = userId;
+        this.providerId = providerId;
         this.status = Status.PENDING;
         this.taskDescription = taskDescription;
         this.target = target;
         this.skills = List.copyOf(skills);
         this.results = new ConcurrentHashMap<>();
         this.createdAt = Instant.now();
+    }
+
+    String getUserId() {
+        return userId;
+    }
+
+    String getProviderId() {
+        return providerId;
     }
 
     String getComparisonId() {

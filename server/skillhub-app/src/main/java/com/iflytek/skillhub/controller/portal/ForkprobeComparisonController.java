@@ -6,6 +6,7 @@ import com.iflytek.skillhub.dto.ApiResponse;
 import com.iflytek.skillhub.dto.ApiResponseFactory;
 import com.iflytek.skillhub.dto.forkprobe.CompareRequest;
 import com.iflytek.skillhub.dto.forkprobe.CompareResponse;
+import com.iflytek.skillhub.dto.forkprobe.ComparisonHistoryItem;
 import com.iflytek.skillhub.dto.forkprobe.ComparisonStatusResponse;
 import com.iflytek.skillhub.dto.forkprobe.RecommendRequest;
 import com.iflytek.skillhub.dto.forkprobe.RecommendResponse;
@@ -61,8 +62,11 @@ public class ForkprobeComparisonController extends BaseApiController {
      */
     @PostMapping("/compare")
     @RateLimit(category = "forkprobe-compare", authenticated = 10, anonymous = 3, windowSeconds = 60)
-    public ApiResponse<CompareResponse> compare(@RequestBody @Valid CompareRequest request) {
+    public ApiResponse<CompareResponse> compare(
+            @RequestBody @Valid CompareRequest request,
+            @RequestAttribute(value = "userId", required = false) String userId) {
         CompareResponse response = comparisonService.startComparison(
+                userId,
                 request.taskDescription(),
                 request.skillCoordinates(),
                 request.provider());
@@ -108,5 +112,32 @@ public class ForkprobeComparisonController extends BaseApiController {
     public ApiResponse<Map<String, Object>> config() {
         Map<String, Object> config = comparisonService.getConfig();
         return ok("response.success.read", config);
+    }
+
+    /**
+     * List the current user's persisted comparison runs, newest first.
+     */
+    @GetMapping("/history")
+    public ApiResponse<List<ComparisonHistoryItem>> history(
+            @RequestAttribute(value = "userId", required = false) String userId,
+            @RequestParam(defaultValue = "20") int limit) {
+        List<ComparisonHistoryItem> history = comparisonService.getHistory(userId, limit);
+        return ok("response.success.read", history);
+    }
+
+    /**
+     * Full results of a persisted comparison run, scoped to the owning user.
+     * Returns 404 if the run doesn't exist or belongs to another user.
+     */
+    @GetMapping("/history/{comparisonId}")
+    public ResponseEntity<ApiResponse<ComparisonStatusResponse>> historyDetail(
+            @PathVariable String comparisonId,
+            @RequestAttribute(value = "userId", required = false) String userId) {
+        Optional<ComparisonStatusResponse> status =
+                comparisonService.getHistoryDetail(userId, comparisonId);
+        if (status.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(ok("response.success.read", status.get()));
     }
 }

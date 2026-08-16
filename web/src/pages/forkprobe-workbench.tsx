@@ -11,6 +11,7 @@ import {
   Hash,
   ExternalLink,
   Square,
+  History,
 } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@/shared/ui/button'
@@ -29,6 +30,7 @@ import type { CandidateResult } from '@/features/forkprobe/forkprobe-api'
 import type { RecommendedSkill } from '@/features/forkprobe/forkprobe-api'
 import { resolveSkillLink } from '@/features/forkprobe/forkprobe-api'
 import { ForkprobeOutput } from '@/features/forkprobe/forkprobe-output'
+import { ComparisonHistory } from '@/features/forkprobe/comparison-history'
 
 /** Friendly display names for the known providers; falls back to id. */
 const PROVIDER_LABELS: Record<string, string> = {
@@ -98,6 +100,7 @@ export function ForkprobeWorkbenchPage() {
   const navigate = useNavigate()
 
   const [activeTabIdx, setActiveTabIdx] = useState(0)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   // Derived
   const taskLen = taskDescription.trim().length
@@ -211,6 +214,16 @@ export function ForkprobeWorkbenchPage() {
               )}
             </span>
           )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setHistoryOpen(true)}
+            className="ml-auto sm:ml-0"
+          >
+            <History className="w-3.5 h-3.5 mr-1.5" />
+            历史记录
+          </Button>
         </div>
 
         {/* Step indicator */}
@@ -676,6 +689,8 @@ export function ForkprobeWorkbenchPage() {
         </main>
 
       </div>
+
+      <ComparisonHistory open={historyOpen} onClose={() => setHistoryOpen(false)} />
     </div>
   )
 }

@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iflytek.skillhub.config.AnthropicProperties;
 import com.iflytek.skillhub.config.ForkprobeExecutorProperties;
+import com.iflytek.skillhub.domain.forkprobe.ForkprobeComparison;
+import com.iflytek.skillhub.domain.forkprobe.ForkprobeComparisonRepository;
 import com.iflytek.skillhub.domain.namespace.NamespaceRole;
 import com.iflytek.skillhub.domain.skill.service.SkillQueryService;
 import com.iflytek.skillhub.dto.SkillSummaryResponse;
 import com.iflytek.skillhub.dto.forkprobe.CandidateResult;
 import com.iflytek.skillhub.dto.forkprobe.CompareResponse;
+import com.iflytek.skillhub.dto.forkprobe.ComparisonHistoryItem;
 import com.iflytek.skillhub.dto.forkprobe.ComparisonStatusResponse;
 import com.iflytek.skillhub.dto.forkprobe.RecommendedSkill;
 import com.iflytek.skillhub.dto.forkprobe.ReviewResult;
@@ -19,6 +22,7 @@ import com.iflytek.skillhub.service.SkillSearchAppService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
@@ -97,6 +101,7 @@ public class ForkprobeComparisonService {
     private final AnthropicProperties anthropicProperties;
     private final SkillExecutor skillExecutor;
     private final ExecutorService comparisonExecutor;
+    private final ForkprobeComparisonRepository comparisonRepository;
 
     private final int maxSkills;
     private final int maxSkillsCap;
@@ -111,6 +116,7 @@ public class ForkprobeComparisonService {
             AnthropicProperties anthropicProperties,
             ForkprobeExecutorProperties executorProperties,
             Semaphore sandboxSemaphore,
+            ForkprobeComparisonRepository comparisonRepository,
             @Value("${skillhub.forkprobe.max-skills:3}") int maxSkills,
             @Value("${skillhub.forkprobe.max-skills-cap:5}") int maxSkillsCap,
             @Value("${skillhub.forkprobe.comparison-ttl-minutes:30}") int comparisonTtlMinutes,
@@ -123,6 +129,7 @@ public class ForkprobeComparisonService {
         this.maxSkillsCap = maxSkillsCap;
         this.comparisonTtlMinutes = comparisonTtlMinutes;
         this.reviewMaxTokens = reviewMaxTokens;
+        this.comparisonRepository = comparisonRepository;
         this.judgeModel = anthropicProperties.getJudgeModel();
         this.skillExecutor = createSkillExecutor(
                 anthropicService, anthropicProperties, executorProperties, sandboxSemaphore);
@@ -329,7 +336,7 @@ public class ForkprobeComparisonService {
     /**
      * Start a new comparison run.
      */
-    public CompareResponse startComparison(String taskDescription, List<String> skillCoordinates, String provider) {
+    public CompareResponse startComparison(String userId, String taskDescription, List<String> skillCoordinates, String provider) {
         // Validate
         if (skillCoordinates.size() > maxSkillsCap) {
             throw new IllegalArgumentException("最多只能选择 " + maxSkillsCap + " 个 skill");
@@ -342,7 +349,8 @@ public class ForkprobeComparisonService {
         }
 
         // Create run
-        ComparisonRun run = new ComparisonRun(taskDescription, resolveTarget(provider), specs);
+        ComparisonRun run = new ComparisonRun(
+                userId, normalizeProvider(provider), taskDescription, resolveTarget(provider), specs);
         comparisons.put(run.getComparisonId(), run);
 
         // Execute asynchronously — submit to executor directly (not @Async,
@@ -381,8 +389,25 @@ public class ForkprobeComparisonService {
         if (run == null) {
             return Optional.empty();
         }
+        return Optional.of(toStatusResponse(run));
+    }
 
-        List<CandidateResult> results = run.getSkills().stream()
+    private ComparisonStatusResponse toStatusResponse(ComparisonRun run) {
+        return new ComparisonStatusResponse(
+                run.getComparisonId(),
+                run.getStatus().name(),
+                buildResults(run),
+                run.getError(),
+                run.getStartedAt() != null
+                        ? run.getStartedAt().atOffset(ZoneOffset.UTC).toString() : null,
+                run.getCompletedAt() != null
+                        ? run.getCompletedAt().atOffset(ZoneOffset.UTC).toString() : null,
+                run.getReview()
+        );
+    }
+
+    private List<CandidateResult> buildResults(ComparisonRun run) {
+        return run.getSkills().stream()
                 .map(spec -> {
                     ComparisonResult result = run.getResults().get(spec.coordinate());
                     if (result == null) {
@@ -410,18 +435,6 @@ public class ForkprobeComparisonService {
                     );
                 })
                 .collect(Collectors.toList());
-
-        return Optional.of(new ComparisonStatusResponse(
-                run.getComparisonId(),
-                run.getStatus().name(),
-                results,
-                run.getError(),
-                run.getStartedAt() != null
-                        ? run.getStartedAt().atOffset(ZoneOffset.UTC).toString() : null,
-                run.getCompletedAt() != null
-                        ? run.getCompletedAt().atOffset(ZoneOffset.UTC).toString() : null,
-                run.getReview()
-        ));
     }
 
     /**
@@ -440,6 +453,117 @@ public class ForkprobeComparisonService {
                         "model", e.getValue().getModel() == null ? "" : e.getValue().getModel()))
                 .toList());
         return config;
+    }
+
+    /**
+     * Recent persisted comparison runs for a user, newest first (history list).
+     */
+    public List<ComparisonHistoryItem> getHistory(String userId, int limit) {
+        if (userId == null || userId.isBlank()) {
+            return List.of();
+        }
+        int capped = Math.max(1, Math.min(limit <= 0 ? 20 : limit, 50));
+        List<ForkprobeComparison> rows = comparisonRepository.findByUserIdOrderByCreatedAtDesc(
+                userId, PageRequest.of(0, capped));
+        return rows.stream().map(this::toHistoryItem).collect(Collectors.toList());
+    }
+
+    /**
+     * Full results of a persisted comparison run, scoped to the owning user. Returns
+     * empty if the run doesn't exist or belongs to another user.
+     */
+    public Optional<ComparisonStatusResponse> getHistoryDetail(String userId, String comparisonId) {
+        if (userId == null || userId.isBlank()) {
+            return Optional.empty();
+        }
+        Optional<ForkprobeComparison> row = comparisonRepository.findByComparisonId(comparisonId);
+        if (row.isEmpty() || !userId.equals(row.get().getUserId())) {
+            return Optional.empty();
+        }
+        return Optional.of(toStatusResponse(row.get()));
+    }
+
+    private ComparisonHistoryItem toHistoryItem(ForkprobeComparison row) {
+        return new ComparisonHistoryItem(
+                row.getComparisonId(),
+                row.getTaskDescription(),
+                row.getStatus(),
+                row.getProvider(),
+                parseResults(row.getResultsJson()).size(),
+                row.getCreatedAt() != null
+                        ? row.getCreatedAt().atOffset(ZoneOffset.UTC).toString() : null,
+                row.getCompletedAt() != null
+                        ? row.getCompletedAt().atOffset(ZoneOffset.UTC).toString() : null);
+    }
+
+    private ComparisonStatusResponse toStatusResponse(ForkprobeComparison row) {
+        return new ComparisonStatusResponse(
+                row.getComparisonId(),
+                row.getStatus(),
+                parseResults(row.getResultsJson()),
+                row.getError(),
+                row.getStartedAt() != null
+                        ? row.getStartedAt().atOffset(ZoneOffset.UTC).toString() : null,
+                row.getCompletedAt() != null
+                        ? row.getCompletedAt().atOffset(ZoneOffset.UTC).toString() : null,
+                null // AI review was disabled; persisted runs never carry a review
+        );
+    }
+
+    /**
+     * Deserialize the persisted results JSON array back into candidate results.
+     * Parsed manually (rather than via record deserialization) to avoid needing
+     * the Jackson ParameterNames module on this bare mapper.
+     */
+    private List<CandidateResult> parseResults(String resultsJson) {
+        if (resultsJson == null || resultsJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode arr = objectMapper.readTree(resultsJson);
+            if (arr == null || !arr.isArray()) {
+                return List.of();
+            }
+            List<CandidateResult> results = new ArrayList<>();
+            for (JsonNode node : arr) {
+                results.add(new CandidateResult(
+                        text(node, "skillCoordinate"),
+                        text(node, "skillName"),
+                        nullableText(node, "output"),
+                        node.path("tokensUsed").asInt(0),
+                        (float) node.path("latencySeconds").asDouble(0.0),
+                        node.hasNonNull("skillApplied")
+                                ? node.path("skillApplied").asBoolean() : null,
+                        nullableText(node, "appliedReason"),
+                        nullableText(node, "error"),
+                        nullableText(node, "sourceUrl")));
+            }
+            return results;
+        } catch (Exception e) {
+            log.warn("Failed to parse persisted results: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private static String text(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        return v == null || v.isNull() ? "" : v.asText();
+    }
+
+    private static String nullableText(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        return v == null || v.isNull() ? null : v.asText();
+    }
+
+    /**
+     * Normalise a provider id for persistence: blank/null or {@code "default"} means
+     * "deployment default" and is stored as {@code null}.
+     */
+    private static String normalizeProvider(String provider) {
+        if (provider == null || provider.isBlank() || "default".equalsIgnoreCase(provider)) {
+            return null;
+        }
+        return provider;
     }
 
     /**
@@ -517,6 +641,46 @@ public class ForkprobeComparisonService {
             run.setError(e.getMessage());
             run.setStatus(ComparisonRun.Status.FAILED);
             log.warn("Comparison {} failed: {}", comparisonId, e.getMessage());
+        } finally {
+            persistIfTerminal(run);
+        }
+    }
+
+    /**
+     * Persist the run once it reaches a terminal state so the user can revisit it
+     * after the in-memory store's TTL. Best-effort: persistence failures only log
+     * and never affect the comparison outcome.
+     */
+    private void persistIfTerminal(ComparisonRun run) {
+        ComparisonRun.Status status = run.getStatus();
+        if (status == ComparisonRun.Status.COMPLETED
+                || status == ComparisonRun.Status.FAILED
+                || status == ComparisonRun.Status.CANCELLED) {
+            persistRun(run);
+        }
+    }
+
+    private void persistRun(ComparisonRun run) {
+        if (run.getUserId() == null) {
+            return; // anonymous runs are not retained
+        }
+        try {
+            String resultsJson = objectMapper.writeValueAsString(buildResults(run));
+            ForkprobeComparison entity = new ForkprobeComparison(
+                    run.getComparisonId(),
+                    run.getUserId(),
+                    run.getTaskDescription(),
+                    run.getProviderId(),
+                    run.getStatus().name(),
+                    resultsJson,
+                    run.getError(),
+                    run.getCreatedAt(),
+                    run.getStartedAt(),
+                    run.getCompletedAt());
+            comparisonRepository.save(entity);
+            log.info("Comparison {} persisted with status {}", run.getComparisonId(), run.getStatus().name());
+        } catch (Exception e) {
+            log.warn("Failed to persist comparison {}: {}", run.getComparisonId(), e.getMessage());
         }
     }
 
@@ -751,8 +915,11 @@ public class ForkprobeComparisonService {
 
     private String loadSkillHubPrompt(String namespace, String slug) {
         try {
-            // Try to read SKILL.md for the latest published version
-            InputStream stream = skillQueryService.getFileContent(
+            // Try to read SKILL.md for the latest published version. Use the tag
+            // path: getFileContent(version=…) does a literal version lookup, where
+            // "latest" never matches (versions are "1.0.0" etc.). getFileContentByTag
+            // resolves "latest" → latest_version_id via resolveVersionEntity.
+            InputStream stream = skillQueryService.getFileContentByTag(
                     namespace, slug, "latest", "SKILL.md",
                     null, Map.of());
             String content = new String(stream.readAllBytes(), StandardCharsets.UTF_8);

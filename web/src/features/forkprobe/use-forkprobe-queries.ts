@@ -5,6 +5,8 @@ import {
   getComparisonStatus,
   cancelComparison,
   getForkprobeConfig,
+  getComparisonHistory,
+  getComparisonHistoryDetail,
   type ComparisonStatusResponse,
   type CompareResponse,
 } from './forkprobe-api'
@@ -17,6 +19,9 @@ export const forkprobeKeys = {
     ['forkprobe', 'recommend', taskDescription] as const,
   comparison: (comparisonId: string) =>
     ['forkprobe', 'comparison', comparisonId] as const,
+  history: () => ['forkprobe', 'history'] as const,
+  historyDetail: (comparisonId: string) =>
+    ['forkprobe', 'history', comparisonId] as const,
 }
 
 // --- Config ---
@@ -100,5 +105,31 @@ export function useCancelComparison() {
     onSuccess: (data) => {
       queryClient.setQueryData(forkprobeKeys.comparison(data.comparisonId), data)
     },
+  })
+}
+
+// --- History ---
+
+/**
+ * List the current user's persisted comparison runs, newest first.
+ */
+export function useForkprobeHistory(limit = 20, enabled = true) {
+  return useQuery({
+    queryKey: forkprobeKeys.history(),
+    queryFn: () => getComparisonHistory(limit),
+    enabled,
+    staleTime: 30 * 1000,
+  })
+}
+
+/**
+ * Fetch the full results of a persisted comparison run. Pass `null` when no
+ * history entry is selected.
+ */
+export function useForkprobeHistoryDetail(comparisonId: string | null) {
+  return useQuery<ComparisonStatusResponse>({
+    queryKey: forkprobeKeys.historyDetail(comparisonId!),
+    queryFn: () => getComparisonHistoryDetail(comparisonId!),
+    enabled: !!comparisonId,
   })
 }
