@@ -45,6 +45,11 @@ jobs:
             dockerfile: ./scanner/Dockerfile
             image: ghcr.io/${{ github.repository_owner }}/skillhub-scanner
             mirror_image: skillhub-scanner
+          - name: sandbox
+            context: ./sandbox
+            dockerfile: ./sandbox/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/skillhub-sandbox
+            mirror_image: skillhub-sandbox
 
     steps:
       - name: Check out repository
