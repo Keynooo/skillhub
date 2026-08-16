@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { CheckCircle, AlertTriangle, Clock, Loader2, XCircle } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
+import { ForkprobeOutput } from './forkprobe-output'
 import type { CandidateResult } from './forkprobe-api'
 
 interface ComparisonResultCardProps {
@@ -107,10 +108,10 @@ export function ComparisonResultCard({ result, index }: ComparisonResultCardProp
       )}
       {isCompleted && result.output && (
         <div
-          className="text-sm leading-relaxed whitespace-pre-wrap max-h-[300px] overflow-y-auto rounded-lg p-3"
-          style={{ background: 'hsl(var(--secondary))', color: 'hsl(var(--foreground))' }}
+          className="max-h-[300px] overflow-y-auto rounded-lg p-3"
+          style={{ background: 'hsl(var(--secondary))' }}
         >
-          {result.output}
+          <ForkprobeOutput content={result.output} />
         </div>
       )}
 
