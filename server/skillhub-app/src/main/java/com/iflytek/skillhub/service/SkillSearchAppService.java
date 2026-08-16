@@ -137,6 +137,25 @@ public class SkillSearchAppService {
         return mapVisibleSkillSummaries(similarIds);
     }
 
+    /**
+     * Discovers skills most semantically similar to a free-form text (e.g. a forkprobe
+     * task description) by ranking the visible candidate set by lexical-hash vector
+     * similarity. Deterministic — the same text always yields the same ordering.
+     */
+    public List<SkillSummaryResponse> semanticSearch(
+            String text,
+            int limit,
+            String userId,
+            Map<Long, NamespaceRole> userNsRoles) {
+        if (text == null || text.isBlank()) {
+            return List.of();
+        }
+        int effectiveLimit = Math.max(1, Math.min(limit, 20));
+        SearchVisibilityScope scope = buildVisibilityScope(userId, userNsRoles);
+        List<Long> ids = searchQueryService.findSimilarByText(text, effectiveLimit, scope);
+        return mapVisibleSkillSummaries(ids);
+    }
+
     private Long resolveNamespaceId(String namespaceSlug, String userId, Map<Long, NamespaceRole> userNsRoles) {
         if (namespaceSlug == null || namespaceSlug.isBlank()) {
             return null;

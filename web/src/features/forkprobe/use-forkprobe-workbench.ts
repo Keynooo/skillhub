@@ -9,6 +9,43 @@ import {
 import type { PreselectedSkill } from './comparison-panel-context'
 import type { RecommendedSkill } from './forkprobe-api'
 
+const ACTIVE_RUN_KEY = 'forkprobe.active'
+
+interface ActiveRun {
+  comparisonId: string
+  taskDescription: string
+  provider: string
+  selectedSkills: string[]
+}
+
+function readActiveRun(): ActiveRun | null {
+  try {
+    const raw = sessionStorage.getItem(ACTIVE_RUN_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as ActiveRun | null
+    if (!parsed || typeof parsed.comparisonId !== 'string') return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writeActiveRun(run: ActiveRun) {
+  try {
+    sessionStorage.setItem(ACTIVE_RUN_KEY, JSON.stringify(run))
+  } catch {
+    // storage full/unavailable — non-fatal
+  }
+}
+
+function clearActiveRun() {
+  try {
+    sessionStorage.removeItem(ACTIVE_RUN_KEY)
+  } catch {
+    // ignore
+  }
+}
+
 export type PanelState = 'IDLE' | 'RECOMMENDING' | 'SELECTING' | 'RUNNING' | 'COMPLETED'
 
 export interface UseForkprobeWorkbenchOptions {
@@ -61,11 +98,19 @@ export function useForkprobeWorkbench(
 
   const { data: config } = useForkprobeConfig()
 
-  const [panelState, setPanelState] = useState<PanelState>('IDLE')
-  const [taskDescription, setTaskDescription] = useState('')
-  const [provider, setProvider] = useState('default')
-  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set())
-  const [comparisonId, setComparisonId] = useState<string | null>(null)
+  // Restore any in-flight comparison from sessionStorage so a page refresh
+  // resumes polling instead of dropping the run (backend keeps running).
+  const [restoredRun] = useState<ActiveRun | null>(() => readActiveRun())
+
+  const [panelState, setPanelState] = useState<PanelState>(() => (restoredRun ? 'RUNNING' : 'IDLE'))
+  const [taskDescription, setTaskDescription] = useState(() => restoredRun?.taskDescription ?? '')
+  const [provider, setProvider] = useState(() => restoredRun?.provider ?? 'default')
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(
+    () => new Set(restoredRun?.selectedSkills ?? []),
+  )
+  const [comparisonId, setComparisonId] = useState<string | null>(
+    () => restoredRun?.comparisonId ?? null,
+  )
   const [recommendTask, setRecommendTask] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [manualSkills, setManualSkills] = useState<RecommendedSkill[]>([])
@@ -129,9 +174,20 @@ export function useForkprobeWorkbench(
         statusData.status === 'CANCELLED'
       ) {
         setPanelState('COMPLETED')
+        clearActiveRun()
       }
     }
   }, [panelState, statusData])
+
+  // If the restored comparison no longer exists (backend restart / TTL expiry),
+  // drop the stale run and return to idle instead of polling a 404 forever.
+  useEffect(() => {
+    if (panelState === 'RUNNING' && statusQuery.isError) {
+      clearActiveRun()
+      setPanelState('IDLE')
+      setComparisonId(null)
+    }
+  }, [panelState, statusQuery.isError])
 
   // Preselection from skill detail page / similar-skills compare
   useEffect(() => {
@@ -195,6 +251,12 @@ export function useForkprobeWorkbench(
       })
       setComparisonId(result.comparisonId)
       setPanelState('RUNNING')
+      writeActiveRun({
+        comparisonId: result.comparisonId,
+        taskDescription: taskDescription.trim(),
+        provider,
+        selectedSkills: Array.from(selectedSkills),
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : '启动对比失败')
     }
@@ -214,6 +276,7 @@ export function useForkprobeWorkbench(
     setPanelState('SELECTING')
     setComparisonId(null)
     setSelectedSkills(new Set())
+    clearActiveRun()
   }, [])
 
   return {

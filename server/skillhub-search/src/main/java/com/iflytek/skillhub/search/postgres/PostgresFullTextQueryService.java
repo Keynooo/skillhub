@@ -294,10 +294,29 @@ public class PostgresFullTextQueryService implements SearchQueryService {
         List<Long> candidateIds = visible.skillIds().stream()
                 .filter(id -> !id.equals(skillId))
                 .toList();
+        return rankBySimilarity(targetText, candidateIds, limit);
+    }
+
+    /**
+     * Ranks visible skills by lexical-hash vector similarity to a free-form query
+     * text (e.g. a forkprobe task description). Bypasses full-text keyword matching
+     * entirely so a query that shares no surface tokens with a skill (typically a
+     * Chinese / free-form description) can still surface the closest skills.
+     */
+    @Override
+    public List<Long> findSimilarByText(String text, int limit, SearchVisibilityScope scope) {
+        if (text == null || text.isBlank() || limit <= 0
+                || searchDocumentRepository == null || searchEmbeddingService == null) {
+            return List.of();
+        }
+        SearchResult visible = search(new SearchQuery(null, null, scope, "newest", 0, maxCandidates));
+        return rankBySimilarity(text, visible.skillIds(), limit);
+    }
+
+    private List<Long> rankBySimilarity(String queryText, List<Long> candidateIds, int limit) {
         if (candidateIds.isEmpty()) {
             return List.of();
         }
-
         List<SkillSearchDocumentEntity> documents = searchDocumentRepository.findBySkillIdIn(candidateIds);
         record Scored(Long skillId, double score) {}
 
@@ -308,7 +327,7 @@ public class PostgresFullTextQueryService implements SearchQueryService {
                     if (vector == null || vector.isBlank()) {
                         vector = searchEmbeddingService.embed(composeSearchText(doc));
                     }
-                    return new Scored(doc.getSkillId(), searchEmbeddingService.similarity(targetText, vector));
+                    return new Scored(doc.getSkillId(), searchEmbeddingService.similarity(queryText, vector));
                 })
                 .sorted(Comparator.comparingDouble(Scored::score).reversed())
                 .limit(limit)

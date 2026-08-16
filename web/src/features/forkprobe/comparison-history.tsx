@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X, History, Loader2, ChevronRight, ArrowLeft } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import {
@@ -47,21 +48,18 @@ export function ComparisonHistory({
 
   if (!open) return null
 
-  return (
+  return createPortal(
     <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/30 z-40"
-        onClick={onClose}
-        aria-hidden="true"
-      />
+      {/* Backdrop: dim the page; clicking it closes the drawer */}
+      <div className="fixed inset-0 bg-black/50 z-40" aria-hidden="true" onClick={onClose} />
 
-      {/* Modal */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div
-          className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-2xl border shadow-2xl"
-          style={{ background: 'hsl(var(--card))', borderColor: 'hsl(var(--border))' }}
-        >
+      {/* Drawer: slides in from the right, keeping the workbench visible */}
+      <aside
+        className="fixed inset-y-0 right-0 z-50 w-full max-w-lg flex flex-col border-l bg-card animate-panel-slide-in"
+        style={{ borderColor: 'hsl(var(--border))' }}
+        role="dialog"
+        aria-modal="true"
+      >
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
             <div className="flex items-center gap-2 min-w-0">
@@ -100,9 +98,9 @@ export function ComparisonHistory({
               <HistoryDetail item={selectedItem} detail={detail} isLoading={detailLoading} />
             )}
           </div>
-        </div>
-      </div>
-    </>
+      </aside>
+    </>,
+    document.body,
   )
 }
 

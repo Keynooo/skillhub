@@ -75,23 +75,6 @@ public class ForkprobeComparisonService {
             "\" — \" separator), NOT the \"[N]\" label or the display name. Include exactly one \"scores\" " +
             "entry per candidate, in the same order provided.";
 
-    /**
-     * System prompt for the platform-skill recommendation pass. It is asked to pick the
-     * most relevant skills from a numbered list and return their coordinates as a JSON
-     * array. The task description may be in Chinese, English, or any language, so the
-     * model matches by meaning rather than surface keywords — this is what lets Chinese
-     * task descriptions surface the (English-titled) platform skills.
-     */
-    private static final String RECOMMEND_SYSTEM_PROMPT =
-            "You are a skill recommendation assistant for a skill platform. You match a user's task " +
-            "description to a numbered list of platform skills, each formatted as \"[n] coordinate — name: summary\". " +
-            "The task description may be in Chinese, English, or any language; match by meaning, not surface keywords.\n\n" +
-            "Respond with STRICT JSON only (no markdown fences, no commentary): a JSON array of the coordinates " +
-            "of the most relevant skills, ordered from most to least relevant. Include only skills that are " +
-            "genuinely relevant to the task — if fewer than the requested number are relevant, return fewer " +
-            "rather than padding with unrelated skills. Only include coordinates that appear verbatim in the " +
-            "provided list. If no skill is relevant, return [].";
-
     private final ConcurrentHashMap<String, ComparisonRun> comparisons = new ConcurrentHashMap<>();
     private final ScheduledExecutorService cleanupExecutor = Executors.newSingleThreadScheduledExecutor();
 
@@ -107,7 +90,6 @@ public class ForkprobeComparisonService {
     private final int maxSkillsCap;
     private final int comparisonTtlMinutes;
     private final int reviewMaxTokens;
-    private final String judgeModel;
 
     public ForkprobeComparisonService(
             SkillQueryService skillQueryService,
@@ -130,7 +112,6 @@ public class ForkprobeComparisonService {
         this.comparisonTtlMinutes = comparisonTtlMinutes;
         this.reviewMaxTokens = reviewMaxTokens;
         this.comparisonRepository = comparisonRepository;
-        this.judgeModel = anthropicProperties.getJudgeModel();
         this.skillExecutor = createSkillExecutor(
                 anthropicService, anthropicProperties, executorProperties, sandboxSemaphore);
         this.comparisonExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -174,32 +155,12 @@ public class ForkprobeComparisonService {
         candidates.add(baselineSkill());
 
         try {
-            // 1) Lexical relevance search — fast and accurate for English keyword tasks.
-            // The full-text engine ANDs every token, so free-form or non-English
-            // descriptions usually match nothing and we fall through to the LLM pass.
+            // Deterministic semantic recall over the platform's own published skills:
+            // rank the visible pool by lexical-hash vector similarity to the task text.
+            // The same task description always returns the same candidates — no fragile
+            // keyword full-text AND, no non-deterministic LLM re-pick.
             List<SkillSummaryResponse> matched =
-                    searchSkills(taskDescription, maxCandidates, userId, userNsRoles);
-
-            if (matched.isEmpty()) {
-                // 2) No lexical hit (typically a Chinese / free-form description): fetch the
-                // visible skill pool and ask the LLM to pick the most relevant skills by
-                // meaning. This is what makes Chinese task descriptions surface the
-                // (English-titled) platform skills.
-                List<SkillSummaryResponse> pool = searchSkills(null, 100, userId, userNsRoles);
-                if (anthropicService.isAvailable() && !pool.isEmpty()) {
-                    try {
-                        matched = recommendViaLlm(taskDescription, pool, maxCandidates);
-                    } catch (Exception e) {
-                        log.warn("LLM recommendation failed, falling back to newest: {}", e.getMessage());
-                        matched = List.of();
-                    }
-                }
-                // 3) LLM unavailable or returned nothing — fall back to the newest visible
-                // skills so the user always has real platform skills to pick.
-                if (matched.isEmpty()) {
-                    matched = pool;
-                }
-            }
+                    skillSearchAppService.semanticSearch(taskDescription, maxCandidates, userId, userNsRoles);
 
             for (SkillSummaryResponse skill : matched) {
                 if (candidates.size() >= maxCandidates + 1) break; // +1 for baseline
@@ -210,13 +171,6 @@ public class ForkprobeComparisonService {
         }
 
         return candidates;
-    }
-
-    private List<SkillSummaryResponse> searchSkills(String keyword, int size,
-                                                    String userId, Map<Long, NamespaceRole> userNsRoles) {
-        String sort = (keyword == null || keyword.isBlank()) ? "newest" : "relevance";
-        return skillSearchAppService.search(
-                keyword, null, sort, 0, size, List.of(), userId, userNsRoles).items();
     }
 
     private RecommendedSkill toRecommendedSkill(SkillSummaryResponse skill) {
@@ -233,104 +187,6 @@ public class ForkprobeComparisonService {
     private String coordinateOf(SkillSummaryResponse skill) {
         String namespace = skill.namespace() != null ? skill.namespace() : "";
         return namespace.isBlank() ? skill.slug() : namespace + "/" + skill.slug();
-    }
-
-    /**
-     * Ask the LLM to pick the most relevant platform skills for a task from the given
-     * pool. Returns the selected skills in the LLM's relevance order, empty on any
-     * failure (caller falls back to lexical/newest).
-     */
-    private List<SkillSummaryResponse> recommendViaLlm(String taskDescription,
-                                                       List<SkillSummaryResponse> pool,
-                                                       int maxCandidates) {
-        String userMessage = "Task description:\n" + taskDescription
-                + "\n\nAvailable platform skills:\n" + buildSkillCatalog(pool)
-                + "\nReturn at most " + maxCandidates + " coordinates.";
-
-        // The main model may be a reasoning model whose "thinking" block can crowd out the
-        // tiny JSON answer; retry once on blank/unparseable so the coordinates get through.
-        List<String> coords = List.of();
-        for (int attempt = 0; attempt < 2 && coords.isEmpty(); attempt++) {
-            try {
-                AnthropicService.AnthropicMessageResponse response = anthropicService.sendMessageWithRetry(
-                        RECOMMEND_SYSTEM_PROMPT, userMessage, 1024, 0, judgeModel);
-                coords = parseSkillCoordinates(response.content());
-            } catch (Exception e) {
-                log.warn("LLM recommend attempt {} failed: {}", attempt + 1, e.getMessage());
-            }
-        }
-        if (coords.isEmpty()) {
-            return List.of();
-        }
-
-        Map<String, SkillSummaryResponse> byCoordinate = pool.stream()
-                .collect(Collectors.toMap(this::coordinateOf, s -> s, (a, b) -> a));
-        Map<String, SkillSummaryResponse> bySlug = pool.stream()
-                .collect(Collectors.toMap(SkillSummaryResponse::slug, s -> s, (a, b) -> a));
-
-        List<SkillSummaryResponse> selected = new ArrayList<>();
-        for (String coord : coords) {
-            SkillSummaryResponse skill = byCoordinate.get(coord);
-            if (skill == null) {
-                skill = bySlug.get(coord);
-            }
-            if (skill != null && !selected.contains(skill)) {
-                selected.add(skill);
-            }
-            if (selected.size() >= maxCandidates) {
-                break;
-            }
-        }
-        return selected;
-    }
-
-    private String buildSkillCatalog(List<SkillSummaryResponse> pool) {
-        StringBuilder sb = new StringBuilder();
-        int idx = 1;
-        for (SkillSummaryResponse s : pool) {
-            String name = s.displayName() != null && !s.displayName().isBlank()
-                    ? s.displayName() : s.slug();
-            sb.append('[').append(idx++).append("] ")
-                    .append(coordinateOf(s)).append(" — ").append(name);
-            if (s.summary() != null && !s.summary().isBlank()) {
-                sb.append(": ").append(s.summary());
-            }
-            sb.append('\n');
-        }
-        return sb.toString();
-    }
-
-    /**
-     * Tolerantly extract a JSON string array from the LLM output (may include markdown
-     * fences or surrounding prose).
-     */
-    private List<String> parseSkillCoordinates(String content) {
-        if (content == null || content.isBlank()) {
-            return List.of();
-        }
-        String json = content.trim();
-        int start = json.indexOf('[');
-        int end = json.lastIndexOf(']');
-        if (start < 0 || end <= start) {
-            return List.of();
-        }
-        json = json.substring(start, end + 1);
-        try {
-            JsonNode arr = objectMapper.readTree(json);
-            if (arr == null || !arr.isArray()) {
-                return List.of();
-            }
-            List<String> coords = new ArrayList<>();
-            for (JsonNode node : arr) {
-                if (node.isTextual() && !node.asText().isBlank()) {
-                    coords.add(node.asText().trim());
-                }
-            }
-            return coords;
-        } catch (Exception e) {
-            log.warn("Failed to parse recommend coordinates: {}", e.getMessage());
-            return List.of();
-        }
     }
 
     /**
@@ -754,7 +610,7 @@ public class ForkprobeComparisonService {
             // return blank/unparseable content; retry a few times before giving up.
             for (int attempt = 0; attempt < 3 && review == null; attempt++) {
                 AnthropicService.AnthropicMessageResponse response =
-                        anthropicService.sendMessageWithRetry(REVIEW_SYSTEM_PROMPT, userMessage, reviewMaxTokens, 0, judgeModel);
+                        anthropicService.sendMessageWithRetry(REVIEW_SYSTEM_PROMPT, userMessage, reviewMaxTokens, 0, anthropicProperties.getJudgeModel());
                 ReviewResult parsed = parseReview(response.content());
                 review = parsed == null ? null : normalizeReview(parsed, completed);
                 if (review == null) {
