@@ -174,6 +174,7 @@ class ReviewPortalControllerTest {
                                 "owner-1",
                                 "Owner",
                                 "Summary",
+                                null,
                                 "PUBLIC",
                                 "ACTIVE",
                                 8L,

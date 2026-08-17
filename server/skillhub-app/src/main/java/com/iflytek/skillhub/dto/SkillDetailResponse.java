@@ -10,6 +10,7 @@ public record SkillDetailResponse(
         String ownerId,
         String ownerDisplayName,
         String summary,
+        String summaryZh,
         String visibility,
         String status,
         Long downloadCount,

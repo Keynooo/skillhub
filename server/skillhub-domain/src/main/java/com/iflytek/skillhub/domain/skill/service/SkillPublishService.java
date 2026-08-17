@@ -15,6 +15,7 @@ import com.iflytek.skillhub.domain.review.ReviewTaskRepository;
 import com.iflytek.skillhub.domain.label.LabelTask;
 import com.iflytek.skillhub.domain.label.LabelTaskProducer;
 import com.iflytek.skillhub.domain.security.SecurityScanService;
+import com.iflytek.skillhub.domain.skill.SummaryTranslator;
 import com.iflytek.skillhub.domain.shared.exception.DomainBadRequestException;
 import com.iflytek.skillhub.domain.shared.exception.DomainForbiddenException;
 import com.iflytek.skillhub.domain.skill.*;
@@ -97,6 +98,7 @@ public class SkillPublishService {
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
     private final LabelTaskProducer labelTaskProducer;
+    private final SummaryTranslator summaryTranslator;
     private final boolean autoTaggingEnabled;
 
     public SkillPublishService(
@@ -116,6 +118,7 @@ public class SkillPublishService {
             ApplicationEventPublisher eventPublisher,
             Clock clock,
             LabelTaskProducer labelTaskProducer,
+            SummaryTranslator summaryTranslator,
             @Value("${skillhub.label.auto-tagging.enabled:false}") boolean autoTaggingEnabled) {
         this.namespaceRepository = namespaceRepository;
         this.namespaceMemberRepository = namespaceMemberRepository;
@@ -133,6 +136,7 @@ public class SkillPublishService {
         this.eventPublisher = eventPublisher;
         this.clock = clock;
         this.labelTaskProducer = labelTaskProducer;
+        this.summaryTranslator = summaryTranslator;
         this.autoTaggingEnabled = autoTaggingEnabled;
     }
 
@@ -581,6 +585,7 @@ public class SkillPublishService {
         // 12. Update skill metadata and move the published pointer for auto-publish flows
         skill.setDisplayName(metadata.name());
         skill.setSummary(metadata.description());
+        skill.setSummaryZh(summaryTranslator.translateToChinese(metadata.description()));
         if (autoPublish || visibility == SkillVisibility.PRIVATE) {
             // Update latestVersionId for autoPublish or PRIVATE skill (UPLOADED status)
             skill.setLatestVersionId(version.getId());

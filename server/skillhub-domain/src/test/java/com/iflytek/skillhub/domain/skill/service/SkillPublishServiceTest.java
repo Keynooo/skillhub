@@ -15,6 +15,7 @@ import com.iflytek.skillhub.domain.review.ReviewTask;
 import com.iflytek.skillhub.domain.review.ReviewTaskRepository;
 import com.iflytek.skillhub.domain.shared.exception.DomainBadRequestException;
 import com.iflytek.skillhub.domain.skill.*;
+import com.iflytek.skillhub.domain.skill.SummaryTranslator;
 import com.iflytek.skillhub.domain.skill.metadata.SkillMetadata;
 import com.iflytek.skillhub.domain.skill.metadata.SkillMetadataParser;
 import com.iflytek.skillhub.domain.skill.validation.PackageEntry;
@@ -81,6 +82,8 @@ class SkillPublishServiceTest {
     private SkillStorageDeletionCompensationService compensationService;
     @Mock
     private LabelTaskProducer labelTaskProducer;
+    @Mock
+    private SummaryTranslator summaryTranslator;
 
     private SkillPublishService service;
     private ObjectMapper objectMapper;
@@ -105,6 +108,7 @@ class SkillPublishServiceTest {
                 eventPublisher,
                 CLOCK,
                 labelTaskProducer,
+                summaryTranslator,
                 true
         );
         lenient().when(securityScanService.isEnabled()).thenReturn(true);

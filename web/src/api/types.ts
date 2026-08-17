@@ -225,6 +225,7 @@ export interface SkillDetail {
   ownerId?: string
   ownerDisplayName?: string
   summary?: string
+  summaryZh?: string
   visibility: string
   status: string
   downloadCount: number

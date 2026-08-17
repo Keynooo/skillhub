@@ -824,6 +824,9 @@ export function SkillDetailPage() {
               </div>
             </div>
           )}
+          {skill.summaryZh && (
+            <p className="text-lg text-foreground leading-relaxed">{skill.summaryZh}</p>
+          )}
           {skill.summary && (
             <p className="text-lg text-muted-foreground leading-relaxed">{skill.summary}</p>
           )}

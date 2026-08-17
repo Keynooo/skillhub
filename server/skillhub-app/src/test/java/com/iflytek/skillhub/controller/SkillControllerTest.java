@@ -158,6 +158,7 @@ class SkillControllerTest {
                         "owner-1",
                         "Alice",
                         "Pending preview",
+                        null,
                         "PUBLIC",
                         "ACTIVE",
                         10L,

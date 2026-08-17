@@ -63,6 +63,7 @@ public class ReviewSkillDetailAppService {
                 snapshot.skill().getOwnerId(),
                 snapshot.ownerDisplayName(),
                 snapshot.skill().getSummary(),
+                snapshot.skill().getSummaryZh(),
                 snapshot.skill().getVisibility().name(),
                 snapshot.skill().getStatus().name(),
                 snapshot.skill().getDownloadCount(),
