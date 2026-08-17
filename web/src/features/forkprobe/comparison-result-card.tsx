@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { CheckCircle, AlertTriangle, Clock, Loader2, XCircle } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import { ForkprobeOutput } from './forkprobe-output'
+import { SkillAppliedBadge } from './skill-applied-badge'
 import type { CandidateResult } from './forkprobe-api'
 
 interface ComparisonResultCardProps {
@@ -79,25 +80,7 @@ export function ComparisonResultCard({ result, index }: ComparisonResultCardProp
 
       {/* Status badge */}
       {isCompleted && (
-        <div
-          className={cn(
-            'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium mb-3',
-            skillApplied === true && 'bg-emerald-100 text-emerald-700',
-            skillApplied === false && 'bg-amber-100 text-amber-700',
-          )}
-        >
-          {skillApplied === true ? (
-            <>
-              {t('forkprobe.skillApplied')}
-              <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-            </>
-          ) : (
-            <>
-              {t('forkprobe.skillNotApplied')}
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-            </>
-          )}
-        </div>
+        <SkillAppliedBadge skillApplied={skillApplied} className="mb-3" />
       )}
       {isRunning && (
         <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium mb-3 bg-secondary text-muted-foreground">

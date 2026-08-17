@@ -31,6 +31,7 @@ import type { RecommendedSkill } from '@/features/forkprobe/forkprobe-api'
 import { resolveSkillLink } from '@/features/forkprobe/forkprobe-api'
 import { ForkprobeOutput } from '@/features/forkprobe/forkprobe-output'
 import { ComparisonHistory } from '@/features/forkprobe/comparison-history'
+import { SkillAppliedBadge } from '@/features/forkprobe/skill-applied-badge'
 
 /** Friendly display names for the known providers; falls back to id. */
 const PROVIDER_LABELS: Record<string, string> = {
@@ -158,9 +159,9 @@ export function ForkprobeWorkbenchPage() {
                 <div className="font-medium truncate" style={{ color: 'hsl(var(--foreground))' }}>
                   {r.skillName}
                 </div>
-                {r.appliedReason && (
-                  <div className="text-xs text-muted-foreground truncate mt-0.5">
-                    {r.appliedReason}
+                {r.skillApplied !== null && (
+                  <div className="mt-1.5">
+                    <SkillAppliedBadge skillApplied={r.skillApplied} />
                   </div>
                 )}
               </div>
@@ -634,8 +635,8 @@ export function ForkprobeWorkbenchPage() {
                     </a>
                   )}
                 </div>
-                {activeResult.appliedReason && (
-                  <p className="text-xs text-muted-foreground mt-1">{activeResult.appliedReason}</p>
+                {activeResult.skillApplied !== null && (
+                  <SkillAppliedBadge skillApplied={activeResult.skillApplied} className="mt-1" />
                 )}
               </div>
 
