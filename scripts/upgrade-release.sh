@@ -22,6 +22,7 @@
 #   SKIP_PULL=1    跳过 git pull
 #   SKIP_BACKUP=1  跳过 PostgreSQL 备份（不建议）
 #   SKIP_MIGCHECK=1 跳过迁移安全预检
+#   SKIP_IMAGE_PULL=1 跳过 docker compose pull（离线/已用 load-images.sh 加载镜像后使用）
 #
 # 数据安全: 只重建容器, 命名卷 postgres_data/redis_data/skillhub_storage 不动, 数据保留。
 #           本脚本绝不使用 `down -v`。
@@ -252,11 +253,15 @@ sed -i.bak "s/^SKILLHUB_VERSION=.*/SKILLHUB_VERSION=${IMAGE_TAG}/" .env.release
 # ===========================================================================
 echo ""
 echo "==> 4/4 拉取镜像（仅 skillhub 服务：$APP_SERVICES）"
-if ! $COMPOSE pull $APP_SERVICES; then
-  echo "" >&2
-  echo "❌ 拉取镜像失败（tag ${IMAGE_TAG} 可能还没推到 GHCR），已把 .env.release 恢复到升级前。" >&2
-  mv -f .env.release.bak .env.release
-  exit 1
+if [[ -n "${SKIP_IMAGE_PULL:-}" ]]; then
+  echo "    已跳过（SKIP_IMAGE_PULL=1，使用本地已加载镜像）"
+else
+  if ! $COMPOSE pull $APP_SERVICES; then
+    echo "" >&2
+    echo "❌ 拉取镜像失败（tag ${IMAGE_TAG} 可能还没推到 GHCR），已把 .env.release 恢复到升级前。" >&2
+    mv -f .env.release.bak .env.release
+    exit 1
+  fi
 fi
 
 echo ""
