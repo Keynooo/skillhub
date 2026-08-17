@@ -4,6 +4,7 @@ import com.iflytek.skillhub.auth.rbac.RbacService;
 import com.iflytek.skillhub.domain.audit.AuditLogService;
 import com.iflytek.skillhub.domain.label.LabelDefinition;
 import com.iflytek.skillhub.domain.label.LabelDefinitionService;
+import com.iflytek.skillhub.domain.label.LabelTaggingReviewService;
 import com.iflytek.skillhub.domain.label.LabelTranslation;
 import com.iflytek.skillhub.domain.label.SkillLabel;
 import com.iflytek.skillhub.domain.label.SkillLabelService;
@@ -42,6 +43,7 @@ public class SkillLabelAppService {
     private final AuditLogService auditLogService;
     private final LabelSearchSyncService labelSearchSyncService;
     private final SkillSlugResolutionService skillSlugResolutionService;
+    private final LabelTaggingReviewService labelTaggingReviewService;
 
     public SkillLabelAppService(NamespaceRepository namespaceRepository,
                                 SkillRepository skillRepository,
@@ -52,7 +54,8 @@ public class SkillLabelAppService {
                                 RbacService rbacService,
                                 AuditLogService auditLogService,
                                 LabelSearchSyncService labelSearchSyncService,
-                                SkillSlugResolutionService skillSlugResolutionService) {
+                                SkillSlugResolutionService skillSlugResolutionService,
+                                LabelTaggingReviewService labelTaggingReviewService) {
         this.namespaceRepository = namespaceRepository;
         this.skillRepository = skillRepository;
         this.visibilityChecker = visibilityChecker;
@@ -63,6 +66,7 @@ public class SkillLabelAppService {
         this.auditLogService = auditLogService;
         this.labelSearchSyncService = labelSearchSyncService;
         this.skillSlugResolutionService = skillSlugResolutionService;
+        this.labelTaggingReviewService = labelTaggingReviewService;
     }
 
     public List<SkillLabelDto> listSkillLabels(String namespaceSlug,
@@ -132,6 +136,7 @@ public class SkillLabelAppService {
                 normalizeRoles(userNsRoles),
                 platformRoles(userId)
         );
+        labelTaggingReviewService.markResolved(skill.getId(), userId);
         afterCommit(() -> labelSearchSyncService.rebuildSkill(skill.getId()));
         recordAudit("SKILL_LABEL_ATTACH", userId, skill.getId(), auditContext, "{\"labelSlug\":\"" + labelSlug + "\"}");
         return toDtos(List.of(attached)).getFirst();

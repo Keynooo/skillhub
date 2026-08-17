@@ -254,6 +254,22 @@ public class NotificationEventListener {
         });
     }
 
+    @Async("skillhubEventExecutor")
+    @TransactionalEventListener
+    public void onLabelTaggingFailed(LabelTaggingFailedEvent event) {
+        skillRepository.findById(event.skillId()).ifPresent(skill -> {
+            String title = "Skill needs manual labeling: " + skillDisplayName(skill);
+            Map<String, Object> body = bodyWithSkill(skill);
+            body.put("reason", "Auto-tagging produced no valid scenario labels");
+            String json = toJson(body);
+            List<String> admins = recipientResolver.resolvePlatformSkillAdmins();
+            for (String admin : admins.stream().distinct().toList()) {
+                dispatcher.dispatch(admin, NotificationCategory.REVIEW,
+                        "LABEL_TAGGING_FAILED", title, json, "SKILL", event.skillId());
+            }
+        });
+    }
+
     // --- helpers ---
 
     private String skillDisplayName(Skill skill) {

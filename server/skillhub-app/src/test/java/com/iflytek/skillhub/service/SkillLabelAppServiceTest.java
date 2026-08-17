@@ -3,6 +3,7 @@ package com.iflytek.skillhub.service;
 import com.iflytek.skillhub.auth.rbac.RbacService;
 import com.iflytek.skillhub.domain.audit.AuditLogService;
 import com.iflytek.skillhub.domain.label.LabelDefinitionService;
+import com.iflytek.skillhub.domain.label.LabelTaggingReviewService;
 import com.iflytek.skillhub.domain.label.LabelTranslation;
 import com.iflytek.skillhub.domain.label.SkillLabel;
 import com.iflytek.skillhub.domain.label.SkillLabelService;
@@ -53,6 +54,8 @@ class SkillLabelAppServiceTest {
     private AuditLogService auditLogService;
     @Mock
     private LabelSearchSyncService labelSearchSyncService;
+    @Mock
+    private LabelTaggingReviewService labelTaggingReviewService;
 
     private SkillLabelAppService service;
     private SkillSlugResolutionService skillSlugResolutionService;
@@ -70,7 +73,8 @@ class SkillLabelAppServiceTest {
                 rbacService,
                 auditLogService,
                 labelSearchSyncService,
-                skillSlugResolutionService
+                skillSlugResolutionService,
+                labelTaggingReviewService
         );
     }
 

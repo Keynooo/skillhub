@@ -1,5 +1,6 @@
 package com.iflytek.skillhub.stream;
 
+import com.iflytek.skillhub.domain.label.LabelTaggingReviewService;
 import com.iflytek.skillhub.domain.label.LabelTask;
 import com.iflytek.skillhub.domain.label.LabelTaskProducer;
 import com.iflytek.skillhub.domain.label.SkillLabelService;
@@ -20,20 +21,25 @@ import java.util.Map;
  */
 public class LabelTaskConsumer extends AbstractStreamConsumer<LabelTaskConsumer.LabelTaskPayload> {
 
+    private static final String REASON_NO_LABELS = "Auto-tagging produced no valid scenario labels";
+
     private final LabelTaskProducer labelTaskProducer;
     private final LabelAutoTaggingService labelAutoTaggingService;
     private final SkillLabelService skillLabelService;
+    private final LabelTaggingReviewService labelTaggingReviewService;
 
     public LabelTaskConsumer(RedissonClient redissonClient,
                              String streamKey,
                              String groupName,
                              LabelTaskProducer labelTaskProducer,
                              LabelAutoTaggingService labelAutoTaggingService,
-                             SkillLabelService skillLabelService) {
+                             SkillLabelService skillLabelService,
+                             LabelTaggingReviewService labelTaggingReviewService) {
         super(redissonClient, streamKey, groupName);
         this.labelTaskProducer = labelTaskProducer;
         this.labelAutoTaggingService = labelAutoTaggingService;
         this.skillLabelService = skillLabelService;
+        this.labelTaggingReviewService = labelTaggingReviewService;
     }
 
     public LabelTaskConsumer(RedissonClient redissonClient,
@@ -42,6 +48,7 @@ public class LabelTaskConsumer extends AbstractStreamConsumer<LabelTaskConsumer.
                              LabelTaskProducer labelTaskProducer,
                              LabelAutoTaggingService labelAutoTaggingService,
                              SkillLabelService skillLabelService,
+                             LabelTaggingReviewService labelTaggingReviewService,
                              boolean reclaimEnabled,
                              Duration reclaimMinIdle,
                              int reclaimBatchSize,
@@ -50,6 +57,7 @@ public class LabelTaskConsumer extends AbstractStreamConsumer<LabelTaskConsumer.
         this.labelTaskProducer = labelTaskProducer;
         this.labelAutoTaggingService = labelAutoTaggingService;
         this.skillLabelService = skillLabelService;
+        this.labelTaggingReviewService = labelTaggingReviewService;
     }
 
     @Override
@@ -108,9 +116,11 @@ public class LabelTaskConsumer extends AbstractStreamConsumer<LabelTaskConsumer.
         }
         if (slugs.isEmpty()) {
             log.info("No scenario labels suggested: skillId={}, skillName={}", payload.skillId(), payload.skillName());
+            labelTaggingReviewService.markPending(payload.skillId(), REASON_NO_LABELS);
             return;
         }
         skillLabelService.autoTag(payload.skillId(), slugs, payload.operatorId());
+        labelTaggingReviewService.markResolved(payload.skillId(), payload.operatorId());
     }
 
     @Override

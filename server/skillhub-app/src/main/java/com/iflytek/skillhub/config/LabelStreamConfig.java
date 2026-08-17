@@ -1,5 +1,6 @@
 package com.iflytek.skillhub.config;
 
+import com.iflytek.skillhub.domain.label.LabelTaggingReviewService;
 import com.iflytek.skillhub.domain.label.LabelTaskProducer;
 import com.iflytek.skillhub.domain.label.SkillLabelService;
 import com.iflytek.skillhub.service.label.LabelAutoTaggingService;
@@ -62,7 +63,8 @@ public class LabelStreamConfig {
     public LabelTaskConsumer labelTaskConsumer(RedissonClient redissonClient,
                                                LabelTaskProducer labelTaskProducer,
                                                LabelAutoTaggingService labelAutoTaggingService,
-                                               SkillLabelService skillLabelService) {
+                                               SkillLabelService skillLabelService,
+                                               LabelTaggingReviewService labelTaggingReviewService) {
         return new LabelTaskConsumer(
                 redissonClient,
                 streamKey,
@@ -70,6 +72,7 @@ public class LabelStreamConfig {
                 labelTaskProducer,
                 labelAutoTaggingService,
                 skillLabelService,
+                labelTaggingReviewService,
                 reclaimEnabled,
                 reclaimMinIdle,
                 reclaimBatchSize,
