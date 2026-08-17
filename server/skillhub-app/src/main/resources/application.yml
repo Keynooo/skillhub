@@ -113,6 +113,9 @@ skillhub:
         base-url: ${SKILLHUB_LLM_PROVIDER_LOCAL_BASE_URL:}
         api-key: ${SKILLHUB_LLM_PROVIDER_LOCAL_API_KEY:}
         model: ${SKILLHUB_LLM_PROVIDER_LOCAL_MODEL:vllm-deepseek-v4-flash}
+  summary-translation:
+    provider: ${SKILLHUB_SUMMARY_TRANSLATION_PROVIDER:glm}
+    backfill-on-startup: ${SKILLHUB_SUMMARY_TRANSLATION_BACKFILL:true}
   forkprobe:
     max-skills: 3
     max-skills-cap: 5
