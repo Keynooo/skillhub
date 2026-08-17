@@ -28,6 +28,7 @@ export function Layout() {
   const [isHeaderElevated, setIsHeaderElevated] = useState(false)
   const contentLayoutPathname = resolveAppMainContentPathname(pathname, resolvedPathname)
   const mainContentLayout = getAppMainContentLayout(contentLayoutPathname)
+  const version = window.__SKILLHUB_RUNTIME_CONFIG__?.version?.trim() ?? ''
 
   useEffect(() => {
     const updateHeaderElevation = () => {
@@ -173,7 +174,10 @@ export function Layout() {
             className="mt-6 pt-4 border-t flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs"
             style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--muted-foreground))' }}
           >
-            <span>{t('footer.copyright')}</span>
+            <div className="flex items-center gap-2">
+              <span>{t('footer.copyright')}</span>
+              {version && <span className="opacity-70">{version}</span>}
+            </div>
             <div className="flex items-center gap-2">
               <Link to="/privacy" className="hover:opacity-80 transition-opacity">
                 {t('footer.privacy')}
