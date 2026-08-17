@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate, useRouterState, useSearch } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowUpCircle, ChevronDown, ChevronUp, Clock, Folder, GitCompare, Globe, Lock, RefreshCw, ShieldCheck, Terminal, User, Users } from 'lucide-react'
+import { ArrowLeft, ArrowUpCircle, ChevronDown, ChevronUp, Clock, Folder, GitCompare, Globe, Lock, RefreshCw, ShieldCheck, Sparkles, Terminal, User, Users } from 'lucide-react'
 import { MarkdownRenderer } from '@/features/skill/markdown-renderer'
 import { resolvePackageRelativeLink } from '@/features/skill/package-relative-link'
 import { FileTree } from '@/features/skill/file-tree'
@@ -825,7 +825,13 @@ export function SkillDetailPage() {
             </div>
           )}
           {skill.summaryZh && (
-            <p className="text-lg text-foreground leading-relaxed">{skill.summaryZh}</p>
+            <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
+                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>{t('skillDetail.aiSummaryLabel')}</span>
+              </div>
+              <p className="text-base text-foreground leading-relaxed">{skill.summaryZh}</p>
+            </div>
           )}
           {skill.summary && (
             <p className="text-lg text-muted-foreground leading-relaxed">{skill.summary}</p>

@@ -832,6 +832,7 @@
     "noDocumentationDescription": "该技能版本没有包含可直接展示的 README.md 或 SKILL.md。",
     "noDocumentationHint": "很多技能包只包含可执行文件或配置文件，可以继续查看下方文件列表和版本信息。",
     "summaryLabel": "摘要",
+    "aiSummaryLabel": "AI 摘要",
     "noFiles": "暂无文件",
     "noVersions": "暂无版本",
     "fileCount": "{{count}} 个文件",

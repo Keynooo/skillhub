@@ -832,6 +832,7 @@
     "noDocumentationDescription": "This skill version does not include a readable overview file.",
     "noDocumentationHint": "Many skills only ship executable files. You can continue with the file list and version details below.",
     "summaryLabel": "Summary",
+    "aiSummaryLabel": "AI Summary",
     "noFiles": "No files",
     "noVersions": "No versions",
     "fileCount": "{{count}} files",
