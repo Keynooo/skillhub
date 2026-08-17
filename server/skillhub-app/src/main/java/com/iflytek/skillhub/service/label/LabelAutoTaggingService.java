@@ -6,9 +6,11 @@ import com.iflytek.skillhub.domain.label.LabelDefinition;
 import com.iflytek.skillhub.domain.label.LabelDefinitionRepository;
 import com.iflytek.skillhub.domain.label.LabelTranslation;
 import com.iflytek.skillhub.domain.label.LabelTranslationRepository;
+import com.iflytek.skillhub.config.AnthropicProperties;
 import com.iflytek.skillhub.service.AnthropicService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -43,15 +45,21 @@ public class LabelAutoTaggingService {
     private static final int MAX_BLANK_ATTEMPTS = 3;
 
     private final AnthropicService anthropicService;
+    private final AnthropicProperties properties;
+    private final String providerName;
     private final LabelDefinitionRepository labelDefinitionRepository;
     private final LabelTranslationRepository labelTranslationRepository;
     private final ObjectMapper objectMapper;
 
     public LabelAutoTaggingService(AnthropicService anthropicService,
+                                   AnthropicProperties properties,
+                                   @Value("${skillhub.label.auto-tagging.provider:glm}") String providerName,
                                    LabelDefinitionRepository labelDefinitionRepository,
                                    LabelTranslationRepository labelTranslationRepository,
                                    ObjectMapper objectMapper) {
         this.anthropicService = anthropicService;
+        this.properties = properties;
+        this.providerName = providerName;
         this.labelDefinitionRepository = labelDefinitionRepository;
         this.labelTranslationRepository = labelTranslationRepository;
         this.objectMapper = objectMapper;
@@ -64,8 +72,9 @@ public class LabelAutoTaggingService {
      */
     public List<String> suggestLabels(String skillName, String summary, String bodySample)
             throws IOException, InterruptedException {
-        if (!anthropicService.isAvailable()) {
-            log.warn("Anthropic API key not configured; skipping auto-tag for skill={}", skillName);
+        Target target = resolveTarget();
+        if (target == null) {
+            log.warn("No LLM provider configured for auto-tagging; skipping skill={}", skillName);
             return List.of();
         }
 
@@ -83,7 +92,7 @@ public class LabelAutoTaggingService {
         String systemPrompt = buildSystemPrompt(definitions, displayNameAliases);
         String userMessage = buildUserMessage(skillName, summary, bodySample);
 
-        String content = requestLabels(systemPrompt, userMessage);
+        String content = requestLabels(systemPrompt, userMessage, target);
         List<String> result = filterToCatalog(parseLabels(content), candidateSlugs, displayNameAliases);
         if (result.isEmpty()) {
             log.info("Auto-tag produced no valid labels for skill={}; raw response={}",
@@ -92,11 +101,13 @@ public class LabelAutoTaggingService {
         return result;
     }
 
-    private String requestLabels(String systemPrompt, String userMessage)
+    private String requestLabels(String systemPrompt, String userMessage, Target target)
             throws IOException, InterruptedException {
         String content = "";
         for (int attempt = 0; attempt < MAX_BLANK_ATTEMPTS; attempt++) {
-            content = anthropicService.sendMessage(systemPrompt, userMessage, MAX_OUTPUT_TOKENS).content();
+            content = anthropicService.sendMessageWithRetry(
+                    systemPrompt, userMessage, MAX_OUTPUT_TOKENS, 0,
+                    target.model(), target.baseUrl(), target.apiKey()).content();
             if (content != null && !content.isBlank()) {
                 return content;
             }
@@ -104,6 +115,22 @@ public class LabelAutoTaggingService {
                     attempt + 1, MAX_BLANK_ATTEMPTS);
         }
         return content;
+    }
+
+    private Target resolveTarget() {
+        if (providerName == null || providerName.isBlank() || "default".equalsIgnoreCase(providerName)) {
+            if (!anthropicService.isAvailable()) {
+                return null;
+            }
+            return new Target(properties.getModel(), properties.getBaseUrl(), properties.getApiKey());
+        }
+        return properties.getProvider(providerName)
+                .filter(AnthropicProperties.Provider::isConfigured)
+                .map(provider -> new Target(provider.getModel(), provider.getBaseUrl(), provider.getApiKey()))
+                .orElse(null);
+    }
+
+    private record Target(String model, String baseUrl, String apiKey) {
     }
 
     private Map<String, String> buildDisplayNameAliases(List<LabelDefinition> definitions) {

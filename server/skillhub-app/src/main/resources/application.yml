@@ -179,6 +179,7 @@ skillhub:
     auto-tagging:
       enabled: ${SKILLHUB_LABEL_AUTOTAGGING_ENABLED:false}
       backfill-on-startup: ${SKILLHUB_LABEL_AUTOTAGGING_BACKFILL:false}
+      provider: ${SKILLHUB_LABEL_AUTOTAGGING_PROVIDER:glm}
       stream:
         key: ${SKILLHUB_LABEL_STREAM_KEY:skillhub:label:requests}
         group: ${SKILLHUB_LABEL_STREAM_GROUP:skillhub-labelers}
