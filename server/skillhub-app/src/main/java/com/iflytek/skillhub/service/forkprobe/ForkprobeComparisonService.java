@@ -564,16 +564,13 @@ public class ForkprobeComparisonService {
                 return;
             }
 
-            // Verify skill usage (skip verification for baseline)
+            // Verify skill usage (skip verification for the baseline — it uses no
+            // skill, so it stays null and renders no "skill applied" badge)
             if (!"baseline".equals(spec.coordinate())) {
                 boolean applied = skillExecutor.verify(
                         sr.output(), spec.name(), spec.systemPrompt());
                 result.setSkillApplied(applied);
                 result.setAppliedReason(applied ? "技能方法已应用于输出" : "该 skill 未调用");
-            } else {
-                // Baseline is always "applied" (it's the reference)
-                result.setSkillApplied(true);
-                result.setAppliedReason("基准参照");
             }
         } catch (Exception e) {
             log.warn("Skill '{}' execution error: {}", spec.name(), e.getMessage());
