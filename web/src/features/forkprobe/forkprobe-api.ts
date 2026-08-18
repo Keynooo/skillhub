@@ -125,6 +125,25 @@ export function resolveSkillLink(result: CandidateResult): SkillLinkTarget {
   return null
 }
 
+/**
+ * Resolve the follow-up action for a recommended skill (pre-comparison) so the
+ * user can open its detail page / source before committing to the comparison.
+ * Same coordinate conventions as {@link resolveSkillLink}, but keyed off the
+ * recommendation's own `sourceUrl` field.
+ */
+export function resolveRecommendedSkillLink(skill: RecommendedSkill): SkillLinkTarget {
+  const coord = skill.coordinate
+  if (!coord || coord === 'baseline') return null
+  if (coord.startsWith('catalog:')) {
+    return skill.sourceUrl ? { kind: 'external', href: skill.sourceUrl } : null
+  }
+  const parts = coord.split('/')
+  if (parts.length === 2 && parts[0] && parts[1]) {
+    return { kind: 'detail', namespace: parts[0], slug: parts[1] }
+  }
+  return null
+}
+
 // --- API functions ---
 
 const BASE = `${WEB_API_PREFIX}/forkprobe`

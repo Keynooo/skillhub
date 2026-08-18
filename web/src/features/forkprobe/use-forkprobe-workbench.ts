@@ -10,12 +10,21 @@ import type { PreselectedSkill } from './comparison-panel-context'
 import type { RecommendedSkill } from './forkprobe-api'
 
 const ACTIVE_RUN_KEY = 'forkprobe.active'
+const SELECTING_DRAFT_KEY = 'forkprobe.selecting'
 
 interface ActiveRun {
   comparisonId: string
   taskDescription: string
   provider: string
   selectedSkills: string[]
+}
+
+interface SelectingDraft {
+  taskDescription: string
+  provider: string
+  selectedSkills: string[]
+  recommendations: RecommendedSkill[]
+  manualSkills: RecommendedSkill[]
 }
 
 function readActiveRun(): ActiveRun | null {
@@ -41,6 +50,34 @@ function writeActiveRun(run: ActiveRun) {
 function clearActiveRun() {
   try {
     sessionStorage.removeItem(ACTIVE_RUN_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+function readSelectingDraft(): SelectingDraft | null {
+  try {
+    const raw = sessionStorage.getItem(SELECTING_DRAFT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as SelectingDraft | null
+    if (!parsed || typeof parsed.taskDescription !== 'string') return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writeSelectingDraft(draft: SelectingDraft) {
+  try {
+    sessionStorage.setItem(SELECTING_DRAFT_KEY, JSON.stringify(draft))
+  } catch {
+    // storage full/unavailable — non-fatal
+  }
+}
+
+function clearSelectingDraft() {
+  try {
+    sessionStorage.removeItem(SELECTING_DRAFT_KEY)
   } catch {
     // ignore
   }
@@ -101,19 +138,32 @@ export function useForkprobeWorkbench(
   // Restore any in-flight comparison from sessionStorage so a page refresh
   // resumes polling instead of dropping the run (backend keeps running).
   const [restoredRun] = useState<ActiveRun | null>(() => readActiveRun())
+  // Restore a paused SELECTING draft (task + provider + chosen/recommended skills)
+  // so navigating to a skill detail page and back keeps the comparison state.
+  const [restoredDraft] = useState<SelectingDraft | null>(() => readSelectingDraft())
 
-  const [panelState, setPanelState] = useState<PanelState>(() => (restoredRun ? 'RUNNING' : 'IDLE'))
-  const [taskDescription, setTaskDescription] = useState(() => restoredRun?.taskDescription ?? '')
-  const [provider, setProvider] = useState(() => restoredRun?.provider ?? 'default')
+  const [panelState, setPanelState] = useState<PanelState>(() =>
+    restoredRun ? 'RUNNING' : restoredDraft ? 'SELECTING' : 'IDLE',
+  )
+  const [taskDescription, setTaskDescription] = useState(
+    () => restoredRun?.taskDescription ?? restoredDraft?.taskDescription ?? '',
+  )
+  const [provider, setProvider] = useState(
+    () => restoredRun?.provider ?? restoredDraft?.provider ?? 'default',
+  )
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(
-    () => new Set(restoredRun?.selectedSkills ?? []),
+    () => new Set(restoredRun?.selectedSkills ?? restoredDraft?.selectedSkills ?? []),
   )
   const [comparisonId, setComparisonId] = useState<string | null>(
     () => restoredRun?.comparisonId ?? null,
   )
   const [recommendTask, setRecommendTask] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [manualSkills, setManualSkills] = useState<RecommendedSkill[]>([])
+  const [manualSkills, setManualSkills] = useState<RecommendedSkill[]>(
+    () => restoredDraft?.manualSkills ?? [],
+  )
+  // Stable across renders (restoredDraft is set once via useState initializer).
+  const restoredRecommendations = restoredDraft?.recommendations ?? []
 
   // Queries
   const recommendQuery = useForkprobeRecommend(
@@ -130,8 +180,8 @@ export function useForkprobeWorkbench(
   const apiKeyOk = config?.apiKeyConfigured ?? true
 
   const recommendations = useMemo(
-    () => recommendQuery.data?.candidates ?? [],
-    [recommendQuery.data],
+    () => recommendQuery.data?.candidates ?? restoredRecommendations,
+    [recommendQuery.data, restoredRecommendations],
   )
 
   // Merge preselected skills + manually searched skills into the combined list
@@ -198,6 +248,20 @@ export function useForkprobeWorkbench(
     }
   }, [preselectedSkills, panelState, maxSelect])
 
+  // Persist the SELECTING draft so navigating to a skill detail page and back
+  // restores the task, provider, and chosen/recommended skills.
+  useEffect(() => {
+    if (panelState === 'SELECTING' && taskDescription.trim().length > 0) {
+      writeSelectingDraft({
+        taskDescription,
+        provider,
+        selectedSkills: Array.from(selectedSkills),
+        recommendations,
+        manualSkills,
+      })
+    }
+  }, [panelState, taskDescription, provider, selectedSkills, recommendations, manualSkills])
+
   // --- Handlers ---
 
   const handleGetRecommendations = useCallback(() => {
@@ -251,6 +315,7 @@ export function useForkprobeWorkbench(
       })
       setComparisonId(result.comparisonId)
       setPanelState('RUNNING')
+      clearSelectingDraft()
       writeActiveRun({
         comparisonId: result.comparisonId,
         taskDescription: taskDescription.trim(),
@@ -277,6 +342,7 @@ export function useForkprobeWorkbench(
     setComparisonId(null)
     setSelectedSkills(new Set())
     clearActiveRun()
+    clearSelectingDraft()
   }, [])
 
   return {

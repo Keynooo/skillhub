@@ -28,7 +28,7 @@ import { useForkprobeWorkbench } from '@/features/forkprobe/use-forkprobe-workbe
 import { SkillSearchBox } from '@/features/forkprobe/skill-search-box'
 import type { CandidateResult } from '@/features/forkprobe/forkprobe-api'
 import type { RecommendedSkill } from '@/features/forkprobe/forkprobe-api'
-import { resolveSkillLink } from '@/features/forkprobe/forkprobe-api'
+import { resolveSkillLink, resolveRecommendedSkillLink } from '@/features/forkprobe/forkprobe-api'
 import { ForkprobeOutput } from '@/features/forkprobe/forkprobe-output'
 import { ComparisonHistory } from '@/features/forkprobe/comparison-history'
 import { SkillAppliedBadge } from '@/features/forkprobe/skill-applied-badge'
@@ -364,48 +364,79 @@ export function ForkprobeWorkbenchPage() {
                   const isSelected = selectedSkills.has(skill.coordinate)
                   const atLimit = selectedSkills.size >= maxSelect
                   const disabled = atLimit && !isSelected
+                  const link = resolveRecommendedSkillLink(skill)
                   return (
-                    <button
-                      key={skill.coordinate}
-                      type="button"
-                      onClick={() => !disabled && handleToggleSkill(skill.coordinate)}
-                      disabled={disabled}
-                      className={cn(
-                        'w-full text-left px-3 py-2.5 rounded-lg border text-sm transition-all',
-                        isSelected
-                          ? 'border-primary/40 bg-primary/5 ring-1 ring-primary/10'
-                          : 'border-transparent hover:bg-muted/50',
-                        disabled && 'opacity-40 cursor-not-allowed',
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex-1 min-w-0">
+                    <div key={skill.coordinate} className="flex items-stretch gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => !disabled && handleToggleSkill(skill.coordinate)}
+                        disabled={disabled}
+                        className={cn(
+                          'flex-1 min-w-0 text-left px-3 py-2.5 rounded-lg border text-sm transition-all',
+                          isSelected
+                            ? 'border-primary/40 bg-primary/5 ring-1 ring-primary/10'
+                            : 'border-transparent hover:bg-muted/50',
+                          disabled && 'opacity-40 cursor-not-allowed',
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div
+                              className="font-medium truncate"
+                              style={{ color: 'hsl(var(--foreground))' }}
+                            >
+                              {skill.name}
+                            </div>
+                            <div className="text-xs text-muted-foreground truncate mt-0.5">
+                              {skill.reasonZh || skill.source}
+                            </div>
+                          </div>
                           <div
-                            className="font-medium truncate"
-                            style={{ color: 'hsl(var(--foreground))' }}
+                            className={cn(
+                              'w-5 h-5 rounded border-2 flex items-center justify-center shrink-0',
+                              isSelected
+                                ? 'border-primary bg-primary text-white'
+                                : 'border-border',
+                            )}
                           >
-                            {skill.name}
-                          </div>
-                          <div className="text-xs text-muted-foreground truncate mt-0.5">
-                            {skill.reasonZh || skill.source}
+                            {isSelected && (
+                              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+                                <path d="M13.3 3.3L6 10.6 2.7 7.3 1.3 8.7l4 4c.4.4 1 .4 1.4 0l8-8-1.4-1.4z" />
+                              </svg>
+                            )}
                           </div>
                         </div>
-                        <div
-                          className={cn(
-                            'w-5 h-5 rounded border-2 flex items-center justify-center shrink-0',
-                            isSelected
-                              ? 'border-primary bg-primary text-white'
-                              : 'border-border',
-                          )}
-                        >
-                          {isSelected && (
-                            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-                              <path d="M13.3 3.3L6 10.6 2.7 7.3 1.3 8.7l4 4c.4.4 1 .4 1.4 0l8-8-1.4-1.4z" />
-                            </svg>
-                          )}
-                        </div>
-                      </div>
-                    </button>
+                      </button>
+
+                      {link && (
+                        link.kind === 'detail' ? (
+                          <button
+                            type="button"
+                            title="查看详情"
+                            onClick={() =>
+                              navigate({
+                                to: '/space/$namespace/$slug',
+                                params: { namespace: link.namespace, slug: link.slug },
+                                search: { returnTo: '/forkprobe' },
+                              })
+                            }
+                            className="shrink-0 self-stretch px-2.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                          >
+                            详情
+                          </button>
+                        ) : (
+                          <a
+                            href={link.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="查看源"
+                            className="shrink-0 self-stretch flex items-center px-2.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                          >
+                            查看源
+                          </a>
+                        )
+                      )}
+                    </div>
                   )
                 })}
               </div>
