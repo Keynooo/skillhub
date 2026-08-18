@@ -89,7 +89,8 @@ public class AnthropicService {
         String baseUrl = firstNonBlank(baseUrlOverride, properties.getBaseUrl());
         String apiKey = firstNonBlank(apiKeyOverride, properties.getApiKey());
 
-        String requestBody = buildRequestBody(systemPrompt, userMessage, maxTokens, modelOverride);
+        String requestBody = buildRequestBody(systemPrompt, userMessage, maxTokens, modelOverride,
+                baseUrlOverride == null || baseUrlOverride.isBlank());
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(baseUrl) + "/v1/messages"))
                 .header("x-api-key", apiKey)
@@ -191,11 +192,21 @@ public class AnthropicService {
         return properties.isApiKeyConfigured();
     }
 
-    private String buildRequestBody(String systemPrompt, String userMessage, int maxTokens, String modelOverride) {
+    private String buildRequestBody(String systemPrompt, String userMessage, int maxTokens, String modelOverride,
+                                    boolean disableThinking) {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("model", modelOverride != null && !modelOverride.isBlank()
                 ? modelOverride : properties.getModel());
         root.put("max_tokens", maxTokens);
+
+        // Explicitly disable thinking for the default (DeepSeek) provider so the model
+        // answers directly instead of emitting a "thinking" block that burns the token
+        // budget and can return blank. Override providers (GLM / local vLLM) may not
+        // recognise the field, so it is only sent for the default target.
+        if (disableThinking) {
+            ObjectNode thinking = root.putObject("thinking");
+            thinking.put("type", "disabled");
+        }
 
         ArrayNode system = root.putArray("system");
         ObjectNode systemText = system.addObject();
