@@ -195,7 +195,7 @@ function SkillCheckbox({
         </div>
         {showReason && skill.reasonZh && (
           <p
-            className="text-xs mt-0.5 line-clamp-2"
+            className="text-xs mt-0.5 line-clamp-1"
             style={{ color: 'hsl(var(--muted-foreground))' }}
           >
             {skill.reasonZh}

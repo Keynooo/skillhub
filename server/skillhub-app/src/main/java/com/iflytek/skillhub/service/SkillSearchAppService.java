@@ -156,6 +156,56 @@ public class SkillSearchAppService {
         return mapVisibleSkillSummaries(ids);
     }
 
+    /**
+     * A minimal candidate view for LLM-based recommendation: carries the bilingual
+     * summary (English {@code summary} + machine-translated {@code summaryZh}) that a
+     * re-ranking prompt needs, plus the coordinate parts.
+     */
+    public record RecommendCandidate(
+            Long id,
+            String slug,
+            String displayName,
+            String summary,
+            String summaryZh,
+            String namespaceSlug
+    ) {}
+
+    /**
+     * Returns the full visible/published candidate pool for LLM re-ranking (NOT capped
+     * at 20 like {@link #semanticSearch}). A keyword-less "newest" search reuses the same
+     * visibility/status SQL as regular search, so this returns every skill the caller may
+     * see, in a deterministic order.
+     */
+    public List<RecommendCandidate> listRecommendCandidates(
+            String userId, Map<Long, NamespaceRole> userNsRoles) {
+        SearchVisibilityScope scope = buildVisibilityScope(userId, userNsRoles);
+        SearchResult visible = searchQueryService.search(
+                new SearchQuery(null, null, scope, "newest", 0, 120));
+        if (visible.skillIds().isEmpty()) {
+            return List.of();
+        }
+        List<Skill> skills = skillRepository.findByIdIn(visible.skillIds());
+        Map<Long, Skill> byId = skills.stream()
+                .collect(Collectors.toMap(Skill::getId, Function.identity()));
+        List<Long> namespaceIds = skills.stream().map(Skill::getNamespaceId).distinct().toList();
+        Map<Long, String> nsSlugById = namespaceIds.isEmpty()
+                ? Map.of()
+                : namespaceRepository.findByIdIn(namespaceIds).stream()
+                        .collect(Collectors.toMap(Namespace::getId, Namespace::getSlug));
+        return visible.skillIds().stream()
+                .map(byId::get)
+                .filter(java.util.Objects::nonNull)
+                .map(s -> new RecommendCandidate(
+                        s.getId(),
+                        s.getSlug(),
+                        s.getDisplayName() != null && !s.getDisplayName().isBlank()
+                                ? s.getDisplayName() : s.getSlug(),
+                        s.getSummary(),
+                        s.getSummaryZh(),
+                        nsSlugById.get(s.getNamespaceId())))
+                .toList();
+    }
+
     private Long resolveNamespaceId(String namespaceSlug, String userId, Map<Long, NamespaceRole> userNsRoles) {
         if (namespaceSlug == null || namespaceSlug.isBlank()) {
             return null;

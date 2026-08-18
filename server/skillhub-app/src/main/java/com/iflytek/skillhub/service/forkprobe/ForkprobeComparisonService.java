@@ -76,6 +76,35 @@ public class ForkprobeComparisonService {
             "\" — \" separator), NOT the \"[N]\" label or the display name. Include exactly one \"scores\" " +
             "entry per candidate, in the same order provided.";
 
+    /**
+     * System prompt for the skill recommendation engine. Returns strict JSON whose
+     * entries reference the catalog by integer {@code index}, so no hallucinated
+     * coordinate string can slip through — out-of-range indices are dropped.
+     */
+    private static final String RECOMMEND_SYSTEM_PROMPT =
+            "You are a skill recommendation engine. Given a user's task description (which may be " +
+            "in Chinese or English) and a numbered catalog of available skills, select the skills " +
+            "whose purpose best matches the task, regardless of language. Do not introduce skills " +
+            "that are not in the catalog.\n\n" +
+            "Respond with STRICT JSON only (no markdown fences, no commentary). Schema:\n" +
+            "{\n" +
+            "  \"ranked\": [\n" +
+            "    {\"index\": <int, the [N] number from the catalog>,\n" +
+            "     \"reason\": \"<a VERY SHORT Chinese phrase, at most 10 characters, that names the match, e.g. 查天气 / 画流程图 / 整理会议纪要>\"}\n" +
+            "  ]\n" +
+            "}\n" +
+            "Order by relevance descending. Use only index values present in the catalog. If nothing " +
+            "fits, return {\"ranked\": []}.";
+
+    /**
+     * Meta-skills that describe SkillHub/forkprobe itself rather than a task the user
+     * wants to accomplish. Recommending them on the forkprobe comparison page is
+     * self-referential (comparing the comparison feature against itself), so they are
+     * dropped from the recommendation candidate pool.
+     */
+    private static final Set<String> RECOMMENDATION_EXCLUDED_SLUGS =
+            Set.of("forkprobe", "find-skills", "skillhub-hello");
+
     private final ConcurrentHashMap<String, ComparisonRun> comparisons = new ConcurrentHashMap<>();
     private final ScheduledExecutorService cleanupExecutor = Executors.newSingleThreadScheduledExecutor();
 
@@ -91,6 +120,14 @@ public class ForkprobeComparisonService {
     private final int maxSkillsCap;
     private final int comparisonTtlMinutes;
     private final int reviewMaxTokens;
+
+    /** Kill switch for the LLM-based recommendation re-rank (falls back to lexical hash). */
+    @Value("${skillhub.forkprobe.recommendation.enabled:true}")
+    private boolean recommendationEnabled = true;
+
+    /** Provider pin for recommendation: {@code default} = auto-resolve (default key, else glm/local). */
+    @Value("${skillhub.forkprobe.recommendation.provider:default}")
+    private String recommendationProvider = "default";
 
     public ForkprobeComparisonService(
             SkillQueryService skillQueryService,
@@ -143,11 +180,10 @@ public class ForkprobeComparisonService {
     /**
      * Recommend skills for a given task description.
      * <p>
-     * Searches the platform's own published skills (visibility-scoped to the
-     * requesting user) by relevance to the task, and returns them alongside a
-     * baseline candidate. Recommending only skills that already exist on the
-     * platform keeps the comparison meaningful: every candidate resolves to a
-     * real SKILL.md the user can open and reuse.
+     * Prefers an LLM re-rank over the full visible pool — the only mechanism with
+     * cross-language recall (e.g. "帮我查天气" → the English "weather" skill) that the
+     * lexical-hash fallback cannot provide. On any LLM failure it degrades to the
+     * deterministic lexical-hash ranking, so it is never worse than before.
      */
     public List<RecommendedSkill> recommend(String taskDescription, int maxCandidates,
                                             String userId, Map<Long, NamespaceRole> userNsRoles) {
@@ -155,11 +191,18 @@ public class ForkprobeComparisonService {
         // Baseline always first
         candidates.add(baselineSkill());
 
+        if (recommendationEnabled) {
+            List<RecommendedSkill> llm = recommendViaLlm(taskDescription, maxCandidates, userId, userNsRoles);
+            if (!llm.isEmpty()) {
+                candidates.addAll(llm);
+                return candidates;
+            }
+            log.warn("LLM recommendation produced no candidates; falling back to lexical-hash ranking");
+        }
+
         try {
-            // Deterministic semantic recall over the platform's own published skills:
-            // rank the visible pool by lexical-hash vector similarity to the task text.
-            // The same task description always returns the same candidates — no fragile
-            // keyword full-text AND, no non-deterministic LLM re-pick.
+            // Fallback: deterministic lexical-hash recall over the platform's published
+            // skills. Kept as-is so an unconfigured/overloaded LLM is never a regression.
             List<SkillSummaryResponse> matched =
                     skillSearchAppService.semanticSearch(taskDescription, maxCandidates, userId, userNsRoles);
 
@@ -172,6 +215,178 @@ public class ForkprobeComparisonService {
         }
 
         return candidates;
+    }
+
+    /**
+     * LLM re-rank over the full visible pool. Returns {@link List#of()} on any failure
+     * (no pool, no target, call failure, unparseable response) so the caller falls back
+     * to the lexical-hash ranking.
+     */
+    private List<RecommendedSkill> recommendViaLlm(String taskDescription, int maxCandidates,
+                                                  String userId, Map<Long, NamespaceRole> userNsRoles) {
+        try {
+            List<SkillSearchAppService.RecommendCandidate> pool =
+                    skillSearchAppService.listRecommendCandidates(userId, userNsRoles).stream()
+                            .filter(c -> isRecommendationEligible(c.slug()))
+                            .toList();
+            if (pool.isEmpty()) {
+                return List.of();
+            }
+            LlmTarget target = resolveRecommendationTarget();
+            if (target == null) {
+                log.info("No LLM target configured for recommendation; skipping LLM re-rank");
+                return List.of();
+            }
+            String userMessage = buildRecommendationPrompt(taskDescription, pool, maxCandidates);
+            String content = callRecommendationModel(userMessage, target);
+            if (content == null || content.isBlank()) {
+                return List.of();
+            }
+            return parseRecommendation(content, pool, maxCandidates);
+        } catch (Exception e) {
+            log.warn("LLM recommendation failed: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * Resolve a concrete LLM target for recommendation, guaranteed to be a working
+     * provider on both dev (default key present) and main (no default key, glm/local
+     * only). Returns {@code null} when nothing is configured, which triggers the
+     * lexical-hash fallback.
+     */
+    private LlmTarget resolveRecommendationTarget() {
+        if (recommendationProvider != null && !recommendationProvider.isBlank()
+                && !"default".equalsIgnoreCase(recommendationProvider)) {
+            AnthropicProperties.Provider p = anthropicProperties.getProviders().get(recommendationProvider);
+            if (p != null && p.isConfigured()) {
+                return new LlmTarget(p.getBaseUrl(), p.getApiKey(), p.getModel());
+            }
+            log.warn("Recommendation provider '{}' not configured; falling back to auto-resolve",
+                    recommendationProvider);
+        }
+        if (anthropicProperties.isApiKeyConfigured()) {
+            String model = anthropicProperties.getJudgeModel() != null
+                    && !anthropicProperties.getJudgeModel().isBlank()
+                    ? anthropicProperties.getJudgeModel() : anthropicProperties.getModel();
+            return new LlmTarget(anthropicProperties.getBaseUrl(), anthropicProperties.getApiKey(), model);
+        }
+        for (String id : List.of("glm", "local")) {
+            AnthropicProperties.Provider p = anthropicProperties.getProviders().get(id);
+            if (p != null && p.isConfigured()) {
+                return new LlmTarget(p.getBaseUrl(), p.getApiKey(), p.getModel());
+            }
+        }
+        return null;
+    }
+
+    static String buildRecommendationPrompt(String taskDescription,
+                                            List<SkillSearchAppService.RecommendCandidate> pool,
+                                            int maxCandidates) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("任务：").append(taskDescription).append("\n\n");
+        sb.append("可用技能（[编号] 坐标 — 名称: 简介）：\n");
+        for (int i = 0; i < pool.size(); i++) {
+            SkillSearchAppService.RecommendCandidate c = pool.get(i);
+            String coordinate = c.namespaceSlug() != null && !c.namespaceSlug().isBlank()
+                    ? c.namespaceSlug() + "/" + c.slug() : c.slug();
+            sb.append('[').append(i + 1).append("] ").append(coordinate)
+                    .append(" — ").append(c.displayName()).append(": ")
+                    .append(truncateSummary(c.summary(), 160));
+            if (c.summaryZh() != null && !c.summaryZh().isBlank()) {
+                sb.append(" / ").append(truncateSummary(c.summaryZh(), 160));
+            }
+            sb.append('\n');
+        }
+        sb.append("共 ").append(pool.size()).append(" 个技能。请返回最相关的 ")
+                .append(Math.max(1, maxCandidates)).append(" 个。");
+        return sb.toString();
+    }
+
+    /**
+     * Call the recommendation model with retry on blank content, mirroring the review
+     * judge's blank-guard. Returns {@code null} when all attempts fail or are blank.
+     */
+    private String callRecommendationModel(String userMessage, LlmTarget target) {
+        int maxTokens = 1024;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                AnthropicService.AnthropicMessageResponse response = anthropicService.sendMessageWithRetry(
+                        RECOMMEND_SYSTEM_PROMPT, userMessage, maxTokens, 0,
+                        target.model(), target.baseUrl(), target.apiKey());
+                if (response.content() != null && !response.content().isBlank()) {
+                    return response.content();
+                }
+            } catch (IOException | InterruptedException e) {
+                log.warn("Recommendation LLM call failed (attempt {}): {}", attempt + 1, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Parse the recommendation JSON into ordered {@link RecommendedSkill} entries.
+     * Tolerant of leading prose / markdown fences (outermost {@code {...}}), and maps
+     * integer indices straight onto the pool — out-of-range indices are dropped.
+     */
+    static List<RecommendedSkill> parseRecommendation(String content,
+                                                      List<SkillSearchAppService.RecommendCandidate> pool,
+                                                      int maxCandidates) {
+        try {
+            String json = content.trim();
+            int start = json.indexOf('{');
+            int end = json.lastIndexOf('}');
+            if (start < 0 || end < start) {
+                return List.of();
+            }
+            JsonNode root = objectMapper.readTree(json.substring(start, end + 1));
+            JsonNode ranked = root.path("ranked");
+            if (!ranked.isArray()) {
+                return List.of();
+            }
+            Map<Integer, RecommendedSkill> byIndex = new LinkedHashMap<>();
+            for (JsonNode entry : ranked) {
+                int index = entry.path("index").asInt(-1);
+                if (index < 1 || index > pool.size() || byIndex.containsKey(index)) {
+                    continue;
+                }
+                String reason = entry.path("reason").asText("");
+                byIndex.put(index, toRecommendedSkill(pool.get(index - 1), reason));
+                if (byIndex.size() >= maxCandidates) {
+                    break;
+                }
+            }
+            return List.copyOf(byIndex.values());
+        } catch (Exception e) {
+            log.warn("Failed to parse recommendation response: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    static RecommendedSkill toRecommendedSkill(SkillSearchAppService.RecommendCandidate c, String reason) {
+        String namespace = c.namespaceSlug() != null ? c.namespaceSlug() : "";
+        String name = c.displayName() != null && !c.displayName().isBlank() ? c.displayName() : c.slug();
+        String coordinate = namespace.isBlank() ? c.slug() : namespace + "/" + c.slug();
+        String reasonZh = reason != null && !reason.isBlank()
+                ? truncateSummary(reason, 20)
+                : (c.summary() != null && !c.summary().isBlank() ? c.summary() : "平台技能，可直接加入对比");
+        return new RecommendedSkill(coordinate, name, namespace, reasonZh, "skillhub", "skillhub", 0, null);
+    }
+
+    static String truncateSummary(String text, int maxChars) {
+        if (text == null) return "";
+        String t = text.trim();
+        return t.length() <= maxChars ? t : t.substring(0, maxChars) + "…";
+    }
+
+    /**
+     * Whether a skill slug is eligible for the forkprobe recommendation pool. Meta-skills
+     * that describe the tool itself ({@link #RECOMMENDATION_EXCLUDED_SLUGS}) are never a
+     * useful "skill to compare for this task", so they are dropped. Package-private for
+     * testability.
+     */
+    static boolean isRecommendationEligible(String slug) {
+        return slug == null || !RECOMMENDATION_EXCLUDED_SLUGS.contains(slug);
     }
 
     private RecommendedSkill toRecommendedSkill(SkillSummaryResponse skill) {
