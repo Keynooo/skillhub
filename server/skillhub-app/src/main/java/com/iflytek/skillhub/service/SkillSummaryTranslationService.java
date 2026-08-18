@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -49,7 +50,7 @@ public class SkillSummaryTranslationService implements SummaryTranslator {
         if (text == null || text.isBlank()) {
             return null;
         }
-        if (CJK.matcher(text).find()) {
+        if (isPredominantlyChinese(text)) {
             return null;
         }
 
@@ -76,6 +77,27 @@ public class SkillSummaryTranslationService implements SummaryTranslator {
             log.warn("Failed to translate skill summary (best-effort): {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Returns true when the summary is already predominantly Chinese and therefore needs no
+     * translation. A bilingual summary (mostly English with a few Chinese trigger phrases) still
+     * has more Latin letters than Han characters, so it is translated into a clean Chinese
+     * summary rather than skipped.
+     */
+    private boolean isPredominantlyChinese(String text) {
+        Matcher matcher = CJK.matcher(text);
+        int cjk = 0;
+        while (matcher.find()) {
+            cjk++;
+        }
+        int latin = 0;
+        for (char c : text.toCharArray()) {
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+                latin++;
+            }
+        }
+        return cjk > latin;
     }
 
     private Target resolveTarget() {
