@@ -33,11 +33,14 @@ interface SkillExecutor {
      * @param output    the generated output text
      * @param skillName the skill display name
      * @param approach  brief description of the skill's approach
+     * @param target    optional per-run provider/model override; verification should
+     *                  run against the same provider that produced the output, or the
+     *                  executor default when {@code null}/blank
      * @return {@code Boolean.TRUE} if applied, {@code Boolean.FALSE} if clearly not,
      *         or {@code null} if verification could not be completed — the caller then
      *         renders "unknown" instead of a misleading applied/not-applied badge
      */
-    Boolean verify(String output, String skillName, String approach);
+    Boolean verify(String output, String skillName, String approach, LlmTarget target);
 
     /**
      * Result of a single skill execution.

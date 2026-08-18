@@ -108,7 +108,7 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
     }
 
     @Override
-    public Boolean verify(String output, String skillName, String approach) {
+    public Boolean verify(String output, String skillName, String approach, LlmTarget target) {
         if (output == null || output.isBlank()) {
             return false;
         }
@@ -118,7 +118,10 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
             return false;
         }
         try {
-            AnthropicMessageResponse response = anthropicService.sendVerification(output, skillName, approach);
+            AnthropicMessageResponse response = target != null && target.hasAny()
+                    ? anthropicService.sendVerification(output, skillName, approach,
+                            target.model(), target.baseUrl(), target.apiKey())
+                    : anthropicService.sendVerification(output, skillName, approach);
             return response.content().trim().toUpperCase().startsWith("YES");
         } catch (Exception e) {
             log.warn("Skill verification failed for '{}': {}", skillName, e.getMessage());

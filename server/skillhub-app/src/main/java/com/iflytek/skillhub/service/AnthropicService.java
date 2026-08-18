@@ -165,6 +165,17 @@ public class AnthropicService {
      */
     public AnthropicMessageResponse sendVerification(String skillOutput, String skillName, String approach)
             throws IOException, InterruptedException {
+        return sendVerification(skillOutput, skillName, approach, null, null, null);
+    }
+
+    /**
+     * Verification with an optional per-run provider/model override, so a comparison run
+     * that targeted an alternate provider (GLM / local vLLM) is judged by that same
+     * provider rather than the deployment default.
+     */
+    public AnthropicMessageResponse sendVerification(String skillOutput, String skillName, String approach,
+                                                     String modelOverride, String baseUrlOverride, String apiKeyOverride)
+            throws IOException, InterruptedException {
 
         String systemPrompt = "You are a verification tool. Answer only YES or NO followed by a one-sentence reason.";
 
@@ -180,15 +191,17 @@ public class AnthropicService {
                 skillName, approach, truncated);
 
         // Judge/verify tasks are deterministic — use the judge model (a fast
-        // non-reasoning model) when configured. Reasoning models burn the token
-        // budget on a "thinking" block and can return blank; use a larger budget
-        // and retry once blank so the verdict text has room to arrive.
+        // non-reasoning model) when configured, unless a named provider override
+        // supplies its own model. Reasoning models burn the token budget on a
+        // "thinking" block and can return blank; use a larger budget and retry once
+        // blank so the verdict text has room to arrive.
         int maxTokens = 1024;
-        String judgeModel = properties.getJudgeModel();
+        String model = modelOverride != null && !modelOverride.isBlank()
+                ? modelOverride : properties.getJudgeModel();
         AnthropicMessageResponse response =
-                sendMessageWithRetry(systemPrompt, userMessage, maxTokens, 0, judgeModel);
+                sendMessageWithRetry(systemPrompt, userMessage, maxTokens, 0, model, baseUrlOverride, apiKeyOverride);
         for (int attempt = 0; attempt < 2 && (response.content() == null || response.content().isBlank()); attempt++) {
-            response = sendMessageWithRetry(systemPrompt, userMessage, maxTokens, 0, judgeModel);
+            response = sendMessageWithRetry(systemPrompt, userMessage, maxTokens, 0, model, baseUrlOverride, apiKeyOverride);
         }
         return response;
     }

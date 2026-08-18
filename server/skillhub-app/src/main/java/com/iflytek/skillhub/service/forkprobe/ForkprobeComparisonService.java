@@ -588,7 +588,7 @@ public class ForkprobeComparisonService {
             // skill, so it stays null and renders no "skill applied" badge)
             if (!"baseline".equals(spec.coordinate())) {
                 Boolean applied = skillExecutor.verify(
-                        sr.output(), spec.name(), spec.systemPrompt());
+                        sr.output(), spec.name(), spec.systemPrompt(), run.getTarget());
                 result.setSkillApplied(applied);
                 result.setAppliedReason(applied == null ? null
                         : applied ? "技能方法已应用于输出" : "该 skill 未调用");
