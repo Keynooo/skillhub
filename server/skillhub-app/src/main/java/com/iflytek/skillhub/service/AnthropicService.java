@@ -89,8 +89,16 @@ public class AnthropicService {
         String baseUrl = firstNonBlank(baseUrlOverride, properties.getBaseUrl());
         String apiKey = firstNonBlank(apiKeyOverride, properties.getApiKey());
 
+        // Disable thinking whenever the request targets the deployment default endpoint,
+        // regardless of whether the caller left the override null or passed the default
+        // base URL back explicitly (both mean "the default target"). DeepSeek's v4 models
+        // enable thinking by default, so the field is required to get a direct answer;
+        // named override providers (GLM / local vLLM) resolve to a different URL and keep
+        // the field out since they may not recognise it.
+        boolean disableThinking = baseUrl != null && baseUrl.equals(properties.getBaseUrl());
+
         String requestBody = buildRequestBody(systemPrompt, userMessage, maxTokens, modelOverride,
-                baseUrlOverride == null || baseUrlOverride.isBlank());
+                disableThinking);
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(baseUrl) + "/v1/messages"))
                 .header("x-api-key", apiKey)
