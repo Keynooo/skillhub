@@ -14,8 +14,8 @@
 #   3. git pull（更新 compose；.env.release 不受影响）
 #   4. pg_dump 备份 PostgreSQL（失败即中止）
 #   5. 改 SKILLHUB_VERSION（留 .env.release.bak）
-#   6. docker compose pull（只拉 server/web/scanner；postgres/redis 用本地已有的；失败自动恢复 .env.release）
-#   7. docker compose up -d --wait
+#   6. docker compose pull（server/web/scanner，另单独预热 sandbox 镜像；失败自动恢复 .env.release）
+#   7. docker compose up -d --wait（失败同样恢复 .env.release）
 #
 # 可选环境变量:
 #   FORCE=1        跳过所有交互确认（用于自动化/无人值守）
@@ -262,10 +262,25 @@ else
     mv -f .env.release.bak .env.release
     exit 1
   fi
+  # 预热 sandbox 镜像（不再是 compose service，forkprobe docker 模式按需 `docker run` 时用）。
+  # 拉失败不致命：默认执行模式是 direct-api，且真正用到时 `docker run` 会现场自动 pull。
+  SANDBOX_IMAGE="$(grep -E '^SKILLHUB_SANDBOX_IMAGE=' .env.release 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]')"
+  SANDBOX_IMAGE="${SANDBOX_IMAGE:-ghcr.io/iflytek/skillhub-sandbox}"
+  SANDBOX_REF="${SANDBOX_IMAGE}:${IMAGE_TAG}"
+  if docker pull "$SANDBOX_REF"; then
+    echo "    ✅ 已预热 sandbox 镜像: $SANDBOX_REF"
+  else
+    echo "    ⚠️  sandbox 镜像预热失败（$SANDBOX_REF），跳过（非致命）" >&2
+  fi
 fi
 
 echo ""
-$COMPOSE up -d --wait
+if ! $COMPOSE up -d --wait; then
+  echo "" >&2
+  echo "❌ docker compose up 失败，已把 .env.release 恢复到升级前。" >&2
+  mv -f .env.release.bak .env.release
+  exit 1
+fi
 
 echo ""
 echo "✅ 完成: ${CURRENT_TAG} → ${IMAGE_TAG}"

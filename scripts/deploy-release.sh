@@ -72,6 +72,10 @@ echo "==> 4/4 起 release 栈（首次拉镜像约 5-15 分钟）"
 if [[ -n "${GITHUB_PAT:-}" ]]; then
   echo "$GITHUB_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 fi
+# 预热 sandbox 镜像（不再是 compose service；forkprobe docker 模式按需 `docker run` 时用，拉失败不致命）
+SANDBOX_IMAGE="$(grep -E '^SKILLHUB_SANDBOX_IMAGE=' .env.release 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]')"
+SANDBOX_IMAGE="${SANDBOX_IMAGE:-ghcr.io/iflytek/skillhub-sandbox}"
+docker pull "${SANDBOX_IMAGE}:${IMAGE_TAG}" || echo "    ⚠️  sandbox 镜像预热失败（非致命，首次 docker 模式对比会现场拉取）" >&2
 docker compose --env-file .env.release \
   -f compose.release.yml \
   -f compose.verify.yml \
