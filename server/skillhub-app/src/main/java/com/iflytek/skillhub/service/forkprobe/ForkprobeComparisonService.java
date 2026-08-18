@@ -451,10 +451,10 @@ public class ForkprobeComparisonService {
                         ? run.getTaskDescription().substring(0, 50) + "..."
                         : run.getTaskDescription());
 
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
         try {
             // Execute skills in parallel (max 3 concurrent)
             Semaphore semaphore = new Semaphore(3);
-            List<CompletableFuture<Void>> futures = new ArrayList<>();
 
             for (ComparisonRun.SkillSpec spec : run.getSkills()) {
                 if (run.isCancelled()) {
@@ -492,13 +492,31 @@ public class ForkprobeComparisonService {
         } catch (TimeoutException e) {
             run.setError("对比执行超时");
             run.setStatus(ComparisonRun.Status.FAILED);
+            cancelInFlight(futures, run);
             log.warn("Comparison {} timed out", comparisonId);
         } catch (Exception e) {
             run.setError(e.getMessage());
             run.setStatus(ComparisonRun.Status.FAILED);
+            cancelInFlight(futures, run);
             log.warn("Comparison {} failed: {}", comparisonId, e.getMessage());
         } finally {
             persistIfTerminal(run);
+        }
+    }
+
+    /**
+     * Signal and interrupt any still-running skill futures when a comparison fails.
+     * The timeout/failure path marks the run terminal but — unlike a user cancel — was
+     * not signalling the in-flight executions, so they would keep burning tokens (or
+     * leave a docker container / claude subprocess alive) with no way to persist the
+     * late result. {@link ComparisonRun#cancel()} flips the {@code run::isCancelled}
+     * signal that subprocess/container executors poll; the future interrupts unblock
+     * any blocking HTTP / process-wait call.
+     */
+    private void cancelInFlight(List<CompletableFuture<Void>> futures, ComparisonRun run) {
+        run.cancel();
+        for (CompletableFuture<Void> future : futures) {
+            future.cancel(true);
         }
     }
 

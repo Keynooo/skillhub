@@ -179,10 +179,13 @@ services:
 
   # Sandbox image for forkprobe's Docker execution mode. Declared here only so
   # `docker compose pull` pre-fetches it to the host daemon; the server runs it
-  # on demand via `docker run` and never as a long-lived service.
+  # on demand via `docker run` (never as a real service). It stays alive with
+  # `sleep infinity` rather than a one-shot command because `docker compose up
+  # --wait` treats any exited container as a failure and would otherwise make
+  # every deploy/upgrade report a non-zero exit even though the stack is healthy.
   skillhub-sandbox:
     image: ${SKILLHUB_SANDBOX_IMAGE:-ghcr.io/iflytek/skillhub-sandbox}:${SKILLHUB_VERSION:-latest}
-    command: ["true"]
+    command: ["sleep", "infinity"]
     restart: "no"
 
 volumes:
