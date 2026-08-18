@@ -3,6 +3,7 @@ package com.iflytek.skillhub.auth.merge;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -93,7 +94,8 @@ class AccountMergeServiceTest {
         given(userAccountRepository.findById("usr_primary")).willReturn(Optional.of(primary));
         given(localCredentialRepository.findByUsernameIgnoreCase("secondary")).willReturn(Optional.of(secondaryCredential));
         given(userAccountRepository.findById("usr_secondary")).willReturn(Optional.of(secondary));
-        given(mergeRequestRepository.existsBySecondaryUserIdAndStatus("usr_secondary", AccountMergeRequest.STATUS_PENDING))
+        given(mergeRequestRepository.existsBySecondaryUserIdAndStatusAndTokenExpiresAtAfter(
+                eq("usr_secondary"), eq(AccountMergeRequest.STATUS_PENDING), any(Instant.class)))
             .willReturn(false);
         given(localCredentialRepository.findByUserId("usr_primary")).willReturn(Optional.empty());
         given(localCredentialRepository.findByUserId("usr_secondary")).willReturn(Optional.of(secondaryCredential));
@@ -115,7 +117,8 @@ class AccountMergeServiceTest {
         given(userAccountRepository.findById("usr_primary")).willReturn(Optional.of(primary));
         given(localCredentialRepository.findByUsernameIgnoreCase("secondary")).willReturn(Optional.of(secondaryCredential));
         given(userAccountRepository.findById("usr_secondary")).willReturn(Optional.of(secondary));
-        given(mergeRequestRepository.existsBySecondaryUserIdAndStatus("usr_secondary", AccountMergeRequest.STATUS_PENDING))
+        given(mergeRequestRepository.existsBySecondaryUserIdAndStatusAndTokenExpiresAtAfter(
+                eq("usr_secondary"), eq(AccountMergeRequest.STATUS_PENDING), any(Instant.class)))
             .willReturn(false);
         given(localCredentialRepository.findByUserId("usr_primary")).willReturn(Optional.empty());
         given(localCredentialRepository.findByUserId("usr_secondary")).willReturn(Optional.of(secondaryCredential));

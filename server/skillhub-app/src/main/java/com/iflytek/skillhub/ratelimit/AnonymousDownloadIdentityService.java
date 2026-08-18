@@ -15,6 +15,8 @@ import java.util.Base64;
 import java.util.Set;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
@@ -33,9 +35,11 @@ public class AnonymousDownloadIdentityService {
             "replace-with-random-download-secret-32-bytes"
     );
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final Logger log = LoggerFactory.getLogger(AnonymousDownloadIdentityService.class);
 
     private final DownloadRateLimitProperties properties;
     private final ClientIpResolver clientIpResolver;
+    private volatile String cookieSecret;
 
     public AnonymousDownloadIdentityService(DownloadRateLimitProperties properties,
                                             ClientIpResolver clientIpResolver) {
@@ -47,7 +51,14 @@ public class AnonymousDownloadIdentityService {
     void validateAnonymousCookieSecret() {
         String secret = properties.getAnonymousCookieSecret();
         if (secret == null || secret.isBlank()) {
-            throw new IllegalStateException("SKILLHUB_DOWNLOAD_ANON_COOKIE_SECRET is required");
+            // Unset → generate an ephemeral secret so a bare deployment still boots and
+            // rate-limits. Identities reset on restart (acceptable for rate limiting).
+            byte[] bytes = new byte[32];
+            RANDOM.nextBytes(bytes);
+            this.cookieSecret = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+            log.warn("SKILLHUB_DOWNLOAD_ANON_COOKIE_SECRET not set; using an ephemeral random secret "
+                    + "(download rate-limit identities reset on restart). Set it for stable identities.");
+            return;
         }
         String trimmedSecret = secret.trim();
         if (DISALLOWED_SECRET_VALUES.contains(trimmedSecret)) {
@@ -56,6 +67,7 @@ public class AnonymousDownloadIdentityService {
         if (trimmedSecret.length() < MIN_SECRET_LENGTH) {
             throw new IllegalStateException("SKILLHUB_DOWNLOAD_ANON_COOKIE_SECRET must be at least 32 characters");
         }
+        this.cookieSecret = trimmedSecret;
     }
 
     public AnonymousDownloadIdentity resolve(HttpServletRequest request, HttpServletResponse response) {
@@ -126,7 +138,7 @@ public class AnonymousDownloadIdentityService {
     private byte[] sign(String value) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(properties.getAnonymousCookieSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            mac.init(new SecretKeySpec(cookieSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             return mac.doFinal(value.getBytes(StandardCharsets.UTF_8));
         } catch (GeneralSecurityException ex) {
             throw new IllegalStateException("Failed to sign anonymous download cookie", ex);

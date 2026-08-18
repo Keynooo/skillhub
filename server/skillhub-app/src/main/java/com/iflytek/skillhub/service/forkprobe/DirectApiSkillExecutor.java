@@ -60,7 +60,7 @@ class DirectApiSkillExecutor implements SkillExecutor {
     }
 
     @Override
-    public boolean verify(String output, String skillName, String approach) {
+    public Boolean verify(String output, String skillName, String approach) {
         if (output == null || output.isBlank()) {
             return false;
         }
@@ -81,9 +81,9 @@ class DirectApiSkillExecutor implements SkillExecutor {
             return verdict.startsWith("YES");
         } catch (Exception e) {
             log.warn("Skill verification failed for '{}': {}", skillName, e.getMessage());
-            // On verification failure, err on the side of marking as applied
-            // to avoid false negatives from a failed verification call
-            return true;
+            // Verification is best-effort. A failed call must not claim "applied"
+            // (nor "not applied") — return null so the caller shows no badge.
+            return null;
         }
     }
 }

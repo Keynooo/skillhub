@@ -64,12 +64,14 @@ public class ForkprobeComparisonController extends BaseApiController {
     @RateLimit(category = "forkprobe-compare", authenticated = 10, anonymous = 3, windowSeconds = 60)
     public ApiResponse<CompareResponse> compare(
             @RequestBody @Valid CompareRequest request,
-            @RequestAttribute(value = "userId", required = false) String userId) {
+            @RequestAttribute(value = "userId", required = false) String userId,
+            @RequestAttribute(value = "userNsRoles", required = false) Map<Long, NamespaceRole> userNsRoles) {
         CompareResponse response = comparisonService.startComparison(
                 userId,
                 request.taskDescription(),
                 request.skillCoordinates(),
-                request.provider());
+                request.provider(),
+                userNsRoles);
         return ok("response.success.create", response);
     }
 

@@ -108,7 +108,7 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
     }
 
     @Override
-    public boolean verify(String output, String skillName, String approach) {
+    public Boolean verify(String output, String skillName, String approach) {
         if (output == null || output.isBlank()) {
             return false;
         }
@@ -122,7 +122,7 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
             return response.content().trim().toUpperCase().startsWith("YES");
         } catch (Exception e) {
             log.warn("Skill verification failed for '{}': {}", skillName, e.getMessage());
-            return true;
+            return null;
         }
     }
 

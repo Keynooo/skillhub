@@ -1,5 +1,6 @@
 package com.iflytek.skillhub.auth.merge;
 
+import java.time.Instant;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
@@ -13,4 +14,7 @@ public interface AccountMergeRequestRepository extends JpaRepository<AccountMerg
     Optional<AccountMergeRequest> findByIdAndPrimaryUserId(Long id, String primaryUserId);
 
     boolean existsBySecondaryUserIdAndStatus(String secondaryUserId, String status);
+
+    boolean existsBySecondaryUserIdAndStatusAndTokenExpiresAtAfter(
+            String secondaryUserId, String status, Instant expiresAfter);
 }

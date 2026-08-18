@@ -61,7 +61,7 @@ export function FilePreviewDialog({
     try {
       await copyToClipboard(content)
     } catch {
-      toast.error(t('filePreview.copyError', { defaultValue: t('filePreview.loadError') }))
+      toast.error(t('filePreview.copyError'))
       setCopyState('idle')
       return
     }

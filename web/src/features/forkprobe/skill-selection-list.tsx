@@ -106,8 +106,8 @@ export function SkillSelectionList({
               style={{ color: 'hsl(var(--muted-foreground))' }}
             >
               {searchQuery.trim()
-                ? '无匹配的技能'
-                : '暂无可用技能'}
+                ? t('forkprobe.noMatchSkill')
+                : t('forkprobe.noSkillsAvailable')}
             </p>
           ) : (
             filteredAll.map((skill) => (

@@ -725,7 +725,7 @@ export function SkillDetailPage() {
         <div className="text-center py-20 animate-fade-up">
           <h2 className="text-2xl font-bold font-heading mb-2">{t('skillDetail.loginRequired')}</h2>
           <p className="text-muted-foreground mb-6">{t('skillDetail.loginRequiredDesc')}</p>
-          <Button onClick={requireLogin}>{t('common.login')}</Button>
+          <Button onClick={requireLogin}>{t('nav.login')}</Button>
         </div>
       )
     }

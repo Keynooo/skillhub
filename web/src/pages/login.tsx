@@ -31,7 +31,7 @@ export function LoginPage() {
   const { data: authMethods } = useAuthMethods(search.returnTo)
 
   const returnTo = search.returnTo && search.returnTo.startsWith('/') ? search.returnTo : '/dashboard'
-  const disabledMessage = search.reason === 'accountDisabled' ? t('apiError.auth.accountDisabled') : null
+  const disabledMessage = search.reason === 'accountDisabled' ? t('error.auth.local.accountDisabled') : null
   const directMethod = directAuthConfig.provider
     ? authMethods?.find((method) =>
       method.methodType === 'DIRECT_PASSWORD' && method.provider === directAuthConfig.provider)

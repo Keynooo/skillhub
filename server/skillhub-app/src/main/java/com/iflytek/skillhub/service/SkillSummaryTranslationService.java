@@ -102,16 +102,27 @@ public class SkillSummaryTranslationService implements SummaryTranslator {
 
     private Target resolveTarget() {
         if (providerName == null || providerName.isBlank() || "default".equalsIgnoreCase(providerName)) {
-            if (!anthropicService.isAvailable()) {
-                return null;
-            }
-            return new Target(properties.getJudgeModel(), properties.getBaseUrl(), properties.getApiKey());
+            return defaultTarget();
         }
 
-        return properties.getProvider(providerName)
+        Target named = properties.getProvider(providerName)
                 .filter(AnthropicProperties.Provider::isConfigured)
                 .map(provider -> new Target(provider.getModel(), provider.getBaseUrl(), provider.getApiKey()))
                 .orElse(null);
+        if (named != null) {
+            return named;
+        }
+        // Named provider (e.g. the default "glm") is not configured — fall back to the
+        // deployment default so translation still works with only a top-level key.
+        log.warn("Provider '{}' not configured for summary translation; falling back to default", providerName);
+        return defaultTarget();
+    }
+
+    private Target defaultTarget() {
+        if (!anthropicService.isAvailable()) {
+            return null;
+        }
+        return new Target(properties.getJudgeModel(), properties.getBaseUrl(), properties.getApiKey());
     }
 
     private record Target(String model, String baseUrl, String apiKey) {

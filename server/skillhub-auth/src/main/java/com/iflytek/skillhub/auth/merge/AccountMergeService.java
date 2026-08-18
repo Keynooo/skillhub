@@ -102,9 +102,10 @@ public class AccountMergeService {
         UserAccount secondaryUser = resolveSecondaryUser(secondaryIdentifier);
         validateMergePair(primaryUser, secondaryUser);
 
-        if (mergeRequestRepository.existsBySecondaryUserIdAndStatus(
+        if (mergeRequestRepository.existsBySecondaryUserIdAndStatusAndTokenExpiresAtAfter(
             secondaryUser.getId(),
-            AccountMergeRequest.STATUS_PENDING
+            AccountMergeRequest.STATUS_PENDING,
+            currentTime()
         )) {
             throw new AuthFlowException(HttpStatus.CONFLICT, "error.auth.merge.pendingExists");
         }

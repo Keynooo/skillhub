@@ -33,9 +33,11 @@ interface SkillExecutor {
      * @param output    the generated output text
      * @param skillName the skill display name
      * @param approach  brief description of the skill's approach
-     * @return {@code true} if applied, {@code false} if not
+     * @return {@code Boolean.TRUE} if applied, {@code Boolean.FALSE} if clearly not,
+     *         or {@code null} if verification could not be completed — the caller then
+     *         renders "unknown" instead of a misleading applied/not-applied badge
      */
-    boolean verify(String output, String skillName, String approach);
+    Boolean verify(String output, String skillName, String approach);
 
     /**
      * Result of a single skill execution.

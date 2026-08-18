@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   GitCompare,
@@ -36,12 +36,11 @@ import { SkillAppliedBadge } from '@/features/forkprobe/skill-applied-badge'
 /** Friendly display names for the known providers; falls back to id. */
 const PROVIDER_LABELS: Record<string, string> = {
   glm: 'GLM',
-  local: '本地 vLLM',
   deepseek: 'DeepSeek',
 }
 
-function providerLabel(id: string, model: string): string {
-  const base = PROVIDER_LABELS[id] ?? id
+function providerLabel(id: string, model: string, localLabel: string): string {
+  const base = id === 'local' ? localLabel : PROVIDER_LABELS[id] ?? id
   return model ? `${base} · ${model}` : base
 }
 
@@ -103,6 +102,13 @@ export function ForkprobeWorkbenchPage() {
   const [activeTabIdx, setActiveTabIdx] = useState(0)
   const [historyOpen, setHistoryOpen] = useState(false)
 
+  // Resetting the workbench must also clear the selected tab, otherwise a fresh
+  // run with fewer results can show a stale/wrong candidate on completion.
+  const handleResetWorkbench = useCallback(() => {
+    handleReset()
+    setActiveTabIdx(0)
+  }, [handleReset])
+
   // Derived
   const taskLen = taskDescription.trim().length
   const taskTooShort = taskLen < 3
@@ -137,7 +143,7 @@ export function ForkprobeWorkbenchPage() {
     onTabClick: (idx: number) => void
     activeIdx: number
   }) => (
-    <div className="space-y-1" role="tablist" aria-label="候选 skill">
+    <div className="space-y-1" role="tablist" aria-label={t('forkprobe.candidateSkill')}>
       {skills.map((r, i) => {
         const isActive = i === activeIdx
         return (
@@ -180,10 +186,10 @@ export function ForkprobeWorkbenchPage() {
 
   // --- Step indicator ---
   const steps = [
-    { num: 1, label: '任务', active: panelState !== 'IDLE' },
-    { num: 2, label: '推荐', active: isSelecting || isRunning || isCompleted },
-    { num: 3, label: '试跑', active: isRunning || isCompleted },
-    { num: 4, label: '继续', active: isCompleted },
+    { num: 1, label: t('forkprobe.stepTask'), active: panelState !== 'IDLE' },
+    { num: 2, label: t('forkprobe.stepRecommend'), active: isSelecting || isRunning || isCompleted },
+    { num: 3, label: t('forkprobe.stepRun'), active: isRunning || isCompleted },
+    { num: 4, label: t('forkprobe.stepContinue'), active: isCompleted },
   ]
 
   return (
@@ -200,13 +206,13 @@ export function ForkprobeWorkbenchPage() {
             </span>
             {isCompleted && (
               <span className="text-xs text-muted-foreground">
-                · 本地生成 · 选择结果后继续执行
+                · {t('forkprobe.reportHint')}
               </span>
             )}
           </div>
           {(isRunning || isCompleted) && (
             <span className="text-xs text-muted-foreground">
-              {totalResults} 路结果
+              {totalResults} {t('forkprobe.totalResults')}
               {isCompleted && (
                 <>
                   {' '}
@@ -223,7 +229,7 @@ export function ForkprobeWorkbenchPage() {
             className="ml-auto sm:ml-0"
           >
             <History className="w-3.5 h-3.5 mr-1.5" />
-            历史记录
+            {t('forkprobe.history')}
           </Button>
         </div>
 
@@ -282,10 +288,10 @@ export function ForkprobeWorkbenchPage() {
             <div className="space-y-4">
               <div>
                 <strong className="text-sm" style={{ color: 'hsl(var(--foreground))' }}>
-                  原始输入
+                  {t('forkprobe.rawInput')}
                 </strong>
                 <div className="text-xs text-muted-foreground mt-0.5">
-                  描述你的任务，系统将从 catalog 中推荐合适的技能候选。
+                  {t('forkprobe.rawInputHint')}
                 </div>
               </div>
 
@@ -298,7 +304,7 @@ export function ForkprobeWorkbenchPage() {
                 className="resize-y"
               />
               <div className="text-xs text-right text-muted-foreground">
-                {taskLen} 字符{taskTooShort && taskLen > 0 && '（至少 3 个）'}
+                {t('forkprobe.charCount', { n: taskLen })}{taskTooShort && taskLen > 0 && t('forkprobe.atLeast3Chars')}
               </div>
 
               <div className="space-y-1.5">
@@ -306,25 +312,25 @@ export function ForkprobeWorkbenchPage() {
                   htmlFor="forkprobe-provider"
                   className="text-xs font-medium text-muted-foreground"
                 >
-                  模型（可选）
+                  {t('forkprobe.modelOptional')}
                 </label>
                 <Select value={provider} onValueChange={setProvider}>
                   <SelectTrigger id="forkprobe-provider" className="w-full">
-                    <SelectValue placeholder="选择模型" />
+                    <SelectValue placeholder={t('forkprobe.selectModel')} />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="default">
-                      {providerLabel('deepseek', config?.defaultModel ?? '')}
+                      {providerLabel('deepseek', config?.defaultModel ?? '', t('forkprobe.providerLocal'))}
                     </SelectItem>
                     {config?.providers.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
-                        {providerLabel(p.id, p.model)}
+                        {providerLabel(p.id, p.model, t('forkprobe.providerLocal'))}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  选择本次对比使用的模型，默认 DeepSeek。
+                  {t('forkprobe.modelHint')}
                 </p>
               </div>
 
@@ -334,7 +340,7 @@ export function ForkprobeWorkbenchPage() {
                 disabled={taskTooShort}
               >
                 <Sparkles className="w-4 h-4 mr-2" />
-                获取推荐
+                {t('forkprobe.getRecommendations')}
               </Button>
 
               <div className="pt-3 mt-3 border-t" style={{ borderColor: 'hsl(var(--border))' }}>
@@ -352,14 +358,14 @@ export function ForkprobeWorkbenchPage() {
             <div className="mt-6 space-y-3">
               <div>
                 <strong className="text-sm" style={{ color: 'hsl(var(--foreground))' }}>
-                  候选 skill
+                  {t('forkprobe.candidateSkill')}
                 </strong>
                 <div className="text-xs text-muted-foreground mt-0.5">
-                  选择最多 {maxSelect} 个要对比的技能
+                  {t('forkprobe.selectUpTo', { n: maxSelect })}
                 </div>
               </div>
 
-              <div className="space-y-1" role="tablist" aria-label="候选 skill">
+              <div className="space-y-1" role="tablist" aria-label={t('forkprobe.candidateSkill')}>
                 {allSkills.map((skill: RecommendedSkill) => {
                   const isSelected = selectedSkills.has(skill.coordinate)
                   const atLimit = selectedSkills.size >= maxSelect
@@ -412,7 +418,7 @@ export function ForkprobeWorkbenchPage() {
                         link.kind === 'detail' ? (
                           <button
                             type="button"
-                            title="查看详情"
+                            title={t('forkprobe.viewDetail')}
                             onClick={() =>
                               navigate({
                                 to: '/space/$namespace/$slug',
@@ -422,17 +428,17 @@ export function ForkprobeWorkbenchPage() {
                             }
                             className="shrink-0 self-stretch px-2.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
                           >
-                            详情
+                            {t('forkprobe.detail')}
                           </button>
                         ) : (
                           <a
                             href={link.href}
                             target="_blank"
                             rel="noopener noreferrer"
-                            title="查看源"
+                            title={t('forkprobe.viewSource')}
                             className="shrink-0 self-stretch flex items-center px-2.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
                           >
-                            查看源
+                            {t('forkprobe.viewSource')}
                           </a>
                         )
                       )}
@@ -455,22 +461,22 @@ export function ForkprobeWorkbenchPage() {
                 {isStartingComparison ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    启动中...
+                    {t('forkprobe.starting')}
                   </>
                 ) : (
                   <>
                     <GitCompare className="w-4 h-4 mr-2" />
-                    开始对比（{selectedSkills.size} 个技能）
+                    {t('forkprobe.startCompareWithCount', { n: selectedSkills.size })}
                   </>
                 )}
               </Button>
 
               <button
                 type="button"
-                onClick={handleReset}
+                onClick={handleResetWorkbench}
                 className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
-                重新输入任务
+                {t('forkprobe.reenterTask')}
               </button>
             </div>
           )}
@@ -480,7 +486,7 @@ export function ForkprobeWorkbenchPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                正在分析任务，搜索合适技能...
+                {t('forkprobe.recommending')}
               </div>
               {[1, 2, 3, 4].map((i) => (
                 <div
@@ -497,7 +503,7 @@ export function ForkprobeWorkbenchPage() {
             <div className="space-y-4">
               <div>
                 <strong className="text-sm" style={{ color: 'hsl(var(--foreground))' }}>
-                  原始输入
+                  {t('forkprobe.rawInput')}
                 </strong>
                 <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                   {taskDescription.length > 150
@@ -508,7 +514,7 @@ export function ForkprobeWorkbenchPage() {
 
               <div className="space-y-2">
                 <strong className="text-sm" style={{ color: 'hsl(var(--foreground))' }}>
-                  试跑进度
+                  {t('forkprobe.runProgress')}
                 </strong>
                 {runningResults.map((r) => {
                   const done = r.output || r.error
@@ -546,7 +552,7 @@ export function ForkprobeWorkbenchPage() {
             <div className="space-y-4">
               <div>
                 <strong className="text-sm" style={{ color: 'hsl(var(--foreground))' }}>
-                  原始输入
+                  {t('forkprobe.rawInput')}
                 </strong>
                 <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                   {taskDescription.length > 200
@@ -557,7 +563,7 @@ export function ForkprobeWorkbenchPage() {
 
               <div>
                 <strong className="text-sm" style={{ color: 'hsl(var(--foreground))' }}>
-                  候选 skill
+                  {t('forkprobe.candidateSkill')}
                 </strong>
                 <div className="mt-2">
                   <SkillTabs
@@ -570,11 +576,11 @@ export function ForkprobeWorkbenchPage() {
 
               <button
                 type="button"
-                onClick={handleReset}
+                onClick={handleResetWorkbench}
                 className="w-full py-2 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center gap-1"
               >
                 <RefreshCw className="w-3 h-3" />
-                重新选择
+                {t('forkprobe.reSelect')}
               </button>
             </div>
           )}
@@ -589,8 +595,8 @@ export function ForkprobeWorkbenchPage() {
                 <Hash className="w-8 h-8 text-muted-foreground/40" />
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                输入任务并获取推荐后，<br />
-                每个技能的输出将在这里展示。
+                {t('forkprobe.idleCenterHint1')}<br />
+                {t('forkprobe.idleCenterHint2')}
               </p>
             </div>
           )}
@@ -602,8 +608,8 @@ export function ForkprobeWorkbenchPage() {
                 <GitCompare className="w-8 h-8 text-muted-foreground/40" />
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                选择要对比的技能后，<br />
-                点击"开始对比"启动试跑。
+                {t('forkprobe.selectCenterHint1')}<br />
+                {t('forkprobe.selectCenterHint2')}
               </p>
             </div>
           )}
@@ -617,7 +623,7 @@ export function ForkprobeWorkbenchPage() {
                   {runningResults.filter((r) => r.output || r.error).length}/{runningResults.length}
                 </span>
               </div>
-              <p className="text-sm text-muted-foreground">试跑中...</p>
+              <p className="text-sm text-muted-foreground">{t('forkprobe.runInProgress')}</p>
               <Button
                 variant="outline"
                 size="sm"
@@ -629,7 +635,7 @@ export function ForkprobeWorkbenchPage() {
                 ) : (
                   <Square className="w-3.5 h-3.5 mr-1" />
                 )}
-                取消
+                {t('forkprobe.cancel')}
               </Button>
             </div>
           )}
@@ -653,14 +659,14 @@ export function ForkprobeWorkbenchPage() {
                         })
                       }
                     >
-                      去详情页
+                      {t('forkprobe.goDetail')}
                       <ChevronRight className="w-3.5 h-3.5 ml-1.5" />
                     </Button>
                   )}
                   {activeResult.output && activeLink?.kind === 'external' && (
                     <a href={activeLink.href} target="_blank" rel="noopener noreferrer">
                       <Button size="sm" variant="outline">
-                        查看源
+                        {t('forkprobe.viewSource')}
                         <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
                       </Button>
                     </a>
@@ -680,7 +686,7 @@ export function ForkprobeWorkbenchPage() {
               {/* Output text */}
               {activeResult.error ? (
                 <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
-                  <p className="font-semibold mb-1">执行失败</p>
+                  <p className="font-semibold mb-1">{t('forkprobe.error')}</p>
                   <p>{activeResult.error}</p>
                 </div>
               ) : activeResult.output ? (
@@ -695,8 +701,8 @@ export function ForkprobeWorkbenchPage() {
                 </div>
               ) : (
                 <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
-                  <p className="font-semibold mb-1">未完成</p>
-                  <p>该 skill 未返回结果（执行超时或仍在运行中）。</p>
+                  <p className="font-semibold mb-1">{t('forkprobe.incomplete')}</p>
+                  <p>{t('forkprobe.incompleteHint')}</p>
                 </div>
               )}
 
@@ -705,16 +711,16 @@ export function ForkprobeWorkbenchPage() {
                 className="text-xs text-center py-2 rounded-lg"
                 style={{ background: 'hsl(var(--muted))', color: 'hsl(var(--muted-foreground))' }}
               >
-                正在查看 {activeResult.skillName}，点击左侧其他候选可切换输出。
+                {t('forkprobe.viewingHint', { name: activeResult.skillName })}
               </p>
             </div>
           )}
 
           {isCompleted && !activeResult && (
             <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center text-sm text-muted-foreground">
-              <p>没有结果可显示。</p>
+              <p>{t('forkprobe.noResults')}</p>
               <button type="button" onClick={handleReset} className="mt-2 text-primary hover:underline">
-                重新选择
+                {t('forkprobe.reSelect')}
               </button>
             </div>
           )}

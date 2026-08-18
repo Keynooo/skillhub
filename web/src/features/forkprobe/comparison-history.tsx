@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { X, History, Loader2, ChevronRight, ArrowLeft } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
@@ -11,16 +12,16 @@ import {
 import { ComparisonResultCard } from './comparison-result-card'
 import type { ComparisonHistoryItem, ComparisonStatusResponse } from './forkprobe-api'
 
-const STATUS_LABELS: Record<string, string> = {
-  COMPLETED: '已完成',
-  FAILED: '失败',
-  CANCELLED: '已取消',
+const STATUS_KEYS: Record<string, string> = {
+  COMPLETED: 'forkprobe.statusCompleted',
+  FAILED: 'forkprobe.statusFailed',
+  CANCELLED: 'forkprobe.statusCancelled',
 }
 
-function formatTime(iso: string | null): string {
+function formatTime(iso: string | null, locale?: string): string {
   if (!iso) return ''
   const d = new Date(iso)
-  return d.toLocaleString('zh-CN', {
+  return d.toLocaleString(locale || 'en', {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -40,6 +41,7 @@ export function ComparisonHistory({
   open: boolean
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   const { data: history, isLoading } = useForkprobeHistory(20, open)
   const [selectedItem, setSelectedItem] = useState<ComparisonHistoryItem | null>(null)
   const { data: detail, isLoading: detailLoading } = useForkprobeHistoryDetail(
@@ -67,20 +69,20 @@ export function ComparisonHistory({
                 <button
                   onClick={() => setSelectedItem(null)}
                   className="p-1.5 rounded-lg hover:bg-secondary transition-colors"
-                  aria-label="返回列表"
+                  aria-label={t('forkprobe.backToList')}
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>
               )}
               <History className="w-5 h-5 text-primary shrink-0" />
               <h2 className="text-lg font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
-                {selectedItem ? '历史详情' : '历史记录'}
+                {selectedItem ? t('forkprobe.historyDetail') : t('forkprobe.history')}
               </h2>
             </div>
             <button
               onClick={onClose}
               className="p-2 rounded-lg hover:bg-secondary transition-colors"
-              aria-label="关闭"
+              aria-label={t('forkprobe.close')}
             >
               <X className="w-5 h-5" style={{ color: 'hsl(var(--muted-foreground))' }} />
             </button>
@@ -113,6 +115,7 @@ function HistoryList({
   isLoading: boolean
   onSelect: (item: ComparisonHistoryItem) => void
 }) {
+  const { t, i18n } = useTranslation()
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -125,7 +128,7 @@ function HistoryList({
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <History className="w-10 h-10 text-muted-foreground/40" />
-        <p className="text-sm text-muted-foreground mt-3">还没有对比记录</p>
+        <p className="text-sm text-muted-foreground mt-3">{t('forkprobe.noHistory')}</p>
       </div>
     )
   }
@@ -161,11 +164,11 @@ function HistoryList({
                         !isFailed && !isCancelled && 'bg-emerald-100 text-emerald-700',
                       )}
                     >
-                      {STATUS_LABELS[status] ?? status}
+                      {STATUS_KEYS[status] ? t(STATUS_KEYS[status]) : status}
                     </span>
-                    <span>{item.skillCount} 个技能</span>
+                    <span>{t('forkprobe.skillCount', { n: item.skillCount })}</span>
                     {item.provider && <span>· {item.provider}</span>}
-                    <span>· {formatTime(item.createdAt)}</span>
+                    <span>· {formatTime(item.createdAt, i18n.resolvedLanguage)}</span>
                   </div>
                 </div>
                 <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
@@ -187,6 +190,7 @@ function HistoryDetail({
   detail: ComparisonStatusResponse | undefined
   isLoading: boolean
 }) {
+  const { t, i18n } = useTranslation()
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -198,7 +202,7 @@ function HistoryDetail({
   if (!detail) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
-        <p className="text-sm text-muted-foreground">未找到该记录</p>
+        <p className="text-sm text-muted-foreground">{t('forkprobe.historyNotFound')}</p>
       </div>
     )
   }
@@ -224,13 +228,13 @@ function HistoryDetail({
             !isFailed && !isCancelled && 'bg-emerald-100 text-emerald-700',
           )}
         >
-          {STATUS_LABELS[detail.status] ?? detail.status}
+          {STATUS_KEYS[detail.status] ? t(STATUS_KEYS[detail.status]) : detail.status}
         </span>
       </div>
 
       <div className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
-        {detail.results.length} 个技能
-        {detail.completedAt && <span> · {formatTime(detail.completedAt)}</span>}
+        {t('forkprobe.skillCount', { n: detail.results.length })}
+        {detail.completedAt && <span> · {formatTime(detail.completedAt, i18n.resolvedLanguage)}</span>}
       </div>
 
       {detail.error && (

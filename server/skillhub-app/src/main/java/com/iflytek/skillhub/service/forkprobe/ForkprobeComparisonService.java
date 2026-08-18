@@ -25,6 +25,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -192,14 +193,15 @@ public class ForkprobeComparisonService {
     /**
      * Start a new comparison run.
      */
-    public CompareResponse startComparison(String userId, String taskDescription, List<String> skillCoordinates, String provider) {
+    public CompareResponse startComparison(String userId, String taskDescription, List<String> skillCoordinates,
+                                           String provider, Map<Long, NamespaceRole> userNsRoles) {
         // Validate
         if (skillCoordinates.size() > maxSkillsCap) {
             throw new IllegalArgumentException("最多只能选择 " + maxSkillsCap + " 个 skill");
         }
 
-        // Resolve skill specs
-        List<ComparisonRun.SkillSpec> specs = resolveSkillSpecs(skillCoordinates);
+        // Resolve skill specs, visibility-scoped to the requesting user
+        List<ComparisonRun.SkillSpec> specs = resolveSkillSpecs(skillCoordinates, userId, userNsRoles);
         if (specs.isEmpty()) {
             throw new IllegalArgumentException("没有找到任何可执行的 skill");
         }
@@ -585,10 +587,11 @@ public class ForkprobeComparisonService {
             // Verify skill usage (skip verification for the baseline — it uses no
             // skill, so it stays null and renders no "skill applied" badge)
             if (!"baseline".equals(spec.coordinate())) {
-                boolean applied = skillExecutor.verify(
+                Boolean applied = skillExecutor.verify(
                         sr.output(), spec.name(), spec.systemPrompt());
                 result.setSkillApplied(applied);
-                result.setAppliedReason(applied ? "技能方法已应用于输出" : "该 skill 未调用");
+                result.setAppliedReason(applied == null ? null
+                        : applied ? "技能方法已应用于输出" : "该 skill 未调用");
             }
         } catch (Exception e) {
             log.warn("Skill '{}' execution error: {}", spec.name(), e.getMessage());
@@ -759,8 +762,11 @@ public class ForkprobeComparisonService {
         return value.trim();
     }
 
-    private List<ComparisonRun.SkillSpec> resolveSkillSpecs(List<String> coordinates) {
+    private List<ComparisonRun.SkillSpec> resolveSkillSpecs(List<String> coordinates,
+                                                            String userId,
+                                                            Map<Long, NamespaceRole> userNsRoles) {
         List<ComparisonRun.SkillSpec> specs = new ArrayList<>();
+        List<String> unreadable = new ArrayList<>();
         for (String coord : coordinates) {
             if ("baseline".equals(coord)) {
                 specs.add(new ComparisonRun.SkillSpec(
@@ -773,34 +779,36 @@ public class ForkprobeComparisonService {
             String[] parts = coord.split("/", 2);
             if (parts.length == 2) {
                 try {
-                    String prompt = loadSkillHubPrompt(parts[0], parts[1]);
+                    String prompt = loadSkillHubPrompt(parts[0], parts[1], userId, userNsRoles);
                     specs.add(new ComparisonRun.SkillSpec(
                             coord, parts[1], parts[0], prompt, null));
                 } catch (Exception e) {
                     log.warn("Failed to load SKILL.md for {}/{}: {}", parts[0], parts[1], e.getMessage());
+                    unreadable.add(coord);
                 }
+            } else {
+                unreadable.add(coord);
             }
+        }
+        if (!unreadable.isEmpty()) {
+            throw new IllegalArgumentException("无法读取以下 skill（可能未公开、不存在或已删除）: "
+                    + String.join("、", unreadable));
         }
         return specs;
     }
 
-    private String loadSkillHubPrompt(String namespace, String slug) {
-        try {
-            // Try to read SKILL.md for the latest published version. Use the tag
-            // path: getFileContent(version=…) does a literal version lookup, where
-            // "latest" never matches (versions are "1.0.0" etc.). getFileContentByTag
-            // resolves "latest" → latest_version_id via resolveVersionEntity.
-            InputStream stream = skillQueryService.getFileContentByTag(
-                    namespace, slug, "latest", "SKILL.md",
-                    null, Map.of());
-            String content = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-
-            // Strip YAML frontmatter (between --- markers)
-            return stripFrontmatter(content);
-        } catch (Exception e) {
-            log.warn("Could not read SKILL.md for {}/{}: {}", namespace, slug, e.getMessage());
-            return "You are a helpful assistant. Skill: " + slug + " from namespace " + namespace + ".";
-        }
+    private String loadSkillHubPrompt(String namespace, String slug,
+                                      String userId, Map<Long, NamespaceRole> userNsRoles) throws IOException {
+        // Read SKILL.md for the latest published version, scoped to the requesting
+        // user's visibility so a user comparing their own private / namespace-only skill
+        // still gets its real content. A skill the user cannot see (or a read error)
+        // propagates and is reported by resolveSkillSpecs rather than silently falling
+        // back to a generic prompt that would produce a misleading comparison.
+        InputStream stream = skillQueryService.getFileContentByTag(
+                namespace, slug, "latest", "SKILL.md",
+                userId, userNsRoles != null ? userNsRoles : Map.of());
+        String content = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        return stripFrontmatter(content);
     }
 
     static String stripFrontmatter(String markdown) {
@@ -828,7 +836,8 @@ public class ForkprobeComparisonService {
             boolean isStale = run.getCreatedAt().isBefore(cutoff);
             // Also clean up completed/failed runs that are old
             boolean isDone = run.getStatus() == ComparisonRun.Status.COMPLETED
-                    || run.getStatus() == ComparisonRun.Status.FAILED;
+                    || run.getStatus() == ComparisonRun.Status.FAILED
+                    || run.getStatus() == ComparisonRun.Status.CANCELLED;
             return isDone && isStale;
         });
         if (comparisons.size() > 100) {

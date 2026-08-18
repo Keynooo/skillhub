@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Search, Loader2, Plus } from 'lucide-react'
 import { Input } from '@/shared/ui/input'
 import { cn } from '@/shared/lib/utils'
@@ -17,6 +18,7 @@ interface SkillSearchBoxProps {
  * into the comparison candidate list, bypassing catalog recommendation.
  */
 export function SkillSearchBox({ selected, onAdd, maxSelect }: SkillSearchBoxProps) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
 
@@ -43,7 +45,7 @@ export function SkillSearchBox({ selected, onAdd, maxSelect }: SkillSearchBoxPro
         />
         <Input
           className="pl-9 h-9 text-sm"
-          placeholder="搜索平台 skill，直接加入对比…"
+          placeholder={t('forkprobe.searchPlatformSkill')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -54,7 +56,7 @@ export function SkillSearchBox({ selected, onAdd, maxSelect }: SkillSearchBoxPro
 
       {enabled && !isFetching && results.length === 0 && (
         <p className="text-xs px-1 py-1" style={{ color: 'hsl(var(--muted-foreground))' }}>
-          无匹配 skill
+          {t('forkprobe.noMatchSkill')}
         </p>
       )}
 

@@ -117,10 +117,10 @@ export function ComparisonPanel() {
                   </div>
                   <div>
                     <h3 className="text-base font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
-                      登录后使用技能对比
+                      {t('forkprobe.loginRequiredTitle')}
                     </h3>
                     <p className="text-sm mt-1" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                      登录 SkillHub 即可使用 AI 对多个技能进行对比评测
+                      {t('forkprobe.loginRequiredDesc')}
                     </p>
                   </div>
                   <Link
@@ -129,14 +129,14 @@ export function ComparisonPanel() {
                     className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-primary text-white text-sm font-medium hover:opacity-90 transition-opacity"
                   >
                     <LogIn className="w-4 h-4" />
-                    去登录 / 注册
+                    {t('forkprobe.goLogin')}
                   </Link>
                 </div>
               ) : (
                 <>
                   {preselectedSkill && (
                     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-sm">
-                      <span className="text-muted-foreground">已选技能：</span>
+                      <span className="text-muted-foreground">{t('forkprobe.preselectedSkill')}</span>
                       <span className="font-medium text-primary">{preselectedSkill.name}</span>
                       <span className="text-xs text-muted-foreground font-mono">{preselectedSkill.coordinate}</span>
                     </div>
@@ -147,7 +147,7 @@ export function ComparisonPanel() {
                       className="text-sm font-medium block"
                       style={{ color: 'hsl(var(--foreground))' }}
                     >
-                      任务描述
+                      {t('forkprobe.taskLabel')}
                     </label>
                     <Textarea
                       placeholder={t('forkprobe.taskPlaceholder')}
@@ -164,10 +164,10 @@ export function ComparisonPanel() {
                           : 'text-muted-foreground',
                       )}>
                         {taskLen === 0
-                          ? '输入至少 3 个字符以获取推荐'
+                          ? t('forkprobe.taskTooShortHint')
                           : taskTooShort
-                            ? `还需 ${3 - taskLen} 个字符`
-                            : '✓ 可以获取推荐了'}
+                            ? t('forkprobe.taskNeedMore', { n: 3 - taskLen })
+                            : t('forkprobe.taskReady')}
                       </span>
                       <span className="text-xs text-muted-foreground">{taskLen}/3+</span>
                     </div>
@@ -210,7 +210,7 @@ export function ComparisonPanel() {
                   className="text-sm font-medium block"
                   style={{ color: 'hsl(var(--foreground))' }}
                 >
-                  任务描述
+                  {t('forkprobe.taskLabel')}
                 </label>
                 <Textarea
                   placeholder={t('forkprobe.taskPlaceholder')}
@@ -310,7 +310,7 @@ export function ComparisonPanel() {
               )}
 
               <div className="text-xs italic px-3 py-2 rounded-lg bg-secondary" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                任务：{taskDescription.length > 100 ? taskDescription.slice(0, 100) + '...' : taskDescription}
+                {t('forkprobe.taskSummary')}{taskDescription.length > 100 ? taskDescription.slice(0, 100) + '...' : taskDescription}
               </div>
 
               {statusDataForState.results.map((result: CandidateResult, idx: number) => (
