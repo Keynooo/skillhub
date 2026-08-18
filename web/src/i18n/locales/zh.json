@@ -785,7 +785,7 @@
     "secondaryPlaceholder": "例如：other_user 或 github:123456",
     "initiating": "发起中...",
     "initiate": "发起合并",
-    "initiateSuccess": "已创建合并请求，secondary={{secondaryUserId}}",
+    "initiateSuccess": "已创建合并请求，secondary={{secondaryUserId}}。验证 token 已发送至 secondary 账号邮箱。",
     "initiateError": "发起合并失败",
     "verifyTitle": "验证并完成合并",
     "verifyDesc": "先完成 token 验证，再单独确认执行数据迁移。",

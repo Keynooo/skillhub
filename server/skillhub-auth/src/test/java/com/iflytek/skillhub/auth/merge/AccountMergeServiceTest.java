@@ -15,6 +15,7 @@ import com.iflytek.skillhub.auth.entity.UserRoleBinding;
 import com.iflytek.skillhub.auth.exception.AuthFlowException;
 import com.iflytek.skillhub.auth.local.LocalCredential;
 import com.iflytek.skillhub.auth.local.LocalCredentialRepository;
+import com.iflytek.skillhub.auth.local.PasswordResetProperties;
 import com.iflytek.skillhub.auth.repository.ApiTokenRepository;
 import com.iflytek.skillhub.auth.repository.IdentityBindingRepository;
 import com.iflytek.skillhub.auth.repository.UserRoleBindingRepository;
@@ -23,6 +24,7 @@ import com.iflytek.skillhub.domain.namespace.NamespaceMemberRepository;
 import com.iflytek.skillhub.domain.namespace.NamespaceRole;
 import com.iflytek.skillhub.domain.user.UserAccount;
 import com.iflytek.skillhub.domain.user.UserAccountRepository;
+import com.iflytek.skillhub.mail.ResendEmailSender;
 import java.lang.reflect.Field;
 import java.time.Clock;
 import java.time.Instant;
@@ -34,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 @ExtendWith(MockitoExtension.class)
@@ -55,6 +58,10 @@ class AccountMergeServiceTest {
     private NamespaceMemberRepository namespaceMemberRepository;
     @Mock
     private PasswordEncoder passwordEncoder;
+    @Mock
+    private JavaMailSender mailSender;
+    @Mock
+    private ResendEmailSender resendEmailSender;
 
     private AccountMergeService service;
     private Clock clock;
@@ -71,7 +78,10 @@ class AccountMergeServiceTest {
             apiTokenRepository,
             namespaceMemberRepository,
             passwordEncoder,
-            clock
+            clock,
+            mailSender,
+            new PasswordResetProperties(),
+            resendEmailSender
         );
     }
 
@@ -93,9 +103,28 @@ class AccountMergeServiceTest {
         var result = service.initiate("usr_primary", "secondary");
 
         assertThat(result.secondaryUserId()).isEqualTo("usr_secondary");
-        assertThat(result.verificationToken()).isNotBlank();
         assertThat(result.expiresAt()).isEqualTo(Instant.parse("2026-03-18T00:30:00Z"));
         verify(mergeRequestRepository).save(any(AccountMergeRequest.class));
+    }
+
+    @Test
+    void initiate_secondaryWithoutEmail_failsClosed() {
+        UserAccount primary = new UserAccount("usr_primary", "primary", "primary@example.com", null);
+        UserAccount secondary = new UserAccount("usr_secondary", "secondary", "", null);
+        LocalCredential secondaryCredential = new LocalCredential("usr_secondary", "secondary", "hash");
+        given(userAccountRepository.findById("usr_primary")).willReturn(Optional.of(primary));
+        given(localCredentialRepository.findByUsernameIgnoreCase("secondary")).willReturn(Optional.of(secondaryCredential));
+        given(userAccountRepository.findById("usr_secondary")).willReturn(Optional.of(secondary));
+        given(mergeRequestRepository.existsBySecondaryUserIdAndStatus("usr_secondary", AccountMergeRequest.STATUS_PENDING))
+            .willReturn(false);
+        given(localCredentialRepository.findByUserId("usr_primary")).willReturn(Optional.empty());
+        given(localCredentialRepository.findByUserId("usr_secondary")).willReturn(Optional.of(secondaryCredential));
+
+        assertThatThrownBy(() -> service.initiate("usr_primary", "secondary"))
+            .isInstanceOf(AuthFlowException.class)
+            .hasMessageContaining("error.auth.merge.secondaryEmailRequired");
+
+        verify(mergeRequestRepository, never()).save(any());
     }
 
     @Test

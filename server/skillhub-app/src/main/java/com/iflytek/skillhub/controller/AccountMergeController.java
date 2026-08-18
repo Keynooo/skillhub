@@ -42,7 +42,6 @@ public class AccountMergeController extends BaseApiController {
         return ok("response.success.created", new MergeInitiateResponse(
             result.mergeRequestId(),
             result.secondaryUserId(),
-            result.verificationToken(),
             result.expiresAt().toString()
         ));
     }

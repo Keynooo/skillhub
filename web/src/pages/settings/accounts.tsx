@@ -23,8 +23,9 @@ export function AccountSettingsPage() {
   const confirmMutation = useConfirmAccountMerge()
 
   /**
-   * Starts the merge flow and surfaces the request id plus verification token
-   * returned by the backend for the following steps.
+   * Starts the merge flow. The verification token is emailed to the secondary
+   * account's email address (not returned here), so the user pastes it in the
+   * verify step after retrieving it from that inbox.
    */
   async function handleInitiate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -32,7 +33,7 @@ export function AccountSettingsPage() {
     try {
       const result = await initiateMutation.mutateAsync({ secondaryIdentifier })
       setMergeRequestId(String(result.mergeRequestId))
-      setVerificationToken(result.verificationToken)
+      setVerificationToken('')
       setStatusMessage(t('accounts.initiateSuccess', { secondaryUserId: result.secondaryUserId }))
     } catch (error) {
       setStatusMessage(

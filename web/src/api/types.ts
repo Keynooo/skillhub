@@ -89,7 +89,6 @@ export interface MergeInitiateRequest {
 export interface MergeInitiateResponse {
   mergeRequestId: number
   secondaryUserId: string
-  verificationToken: string
   expiresAt: string
 }
 

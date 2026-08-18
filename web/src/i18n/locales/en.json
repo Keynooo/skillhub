@@ -785,7 +785,7 @@
     "secondaryPlaceholder": "e.g.: other_user or github:123456",
     "initiating": "Initiating...",
     "initiate": "Initiate Merge",
-    "initiateSuccess": "Merge request created, secondary={{secondaryUserId}}",
+    "initiateSuccess": "Merge request created, secondary={{secondaryUserId}}. A verification token was emailed to the secondary account.",
     "initiateError": "Failed to initiate merge",
     "verifyTitle": "Verify & Complete Merge",
     "verifyDesc": "Complete token verification first, then confirm to execute data migration.",

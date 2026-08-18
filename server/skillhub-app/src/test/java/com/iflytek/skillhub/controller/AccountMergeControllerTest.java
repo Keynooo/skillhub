@@ -40,11 +40,11 @@ class AccountMergeControllerTest {
     private NamespaceMemberRepository namespaceMemberRepository;
 
     @Test
-    void initiate_returnsVerificationToken() throws Exception {
+    void initiate_returnsMergeRequestDetails() throws Exception {
         PlatformPrincipal principal = new PlatformPrincipal("usr_primary", "primary", "p@example.com", "", "local", Set.of());
         var auth = new UsernamePasswordAuthenticationToken(principal, null, List.of());
         given(accountMergeService.initiate("usr_primary", "secondary"))
-            .willReturn(new AccountMergeService.InitiationResult(1L, "usr_secondary", "merge-token", Instant.parse("2026-03-12T22:30:00Z")));
+            .willReturn(new AccountMergeService.InitiationResult(1L, "usr_secondary", Instant.parse("2026-03-12T22:30:00Z")));
 
         mockMvc.perform(post("/api/v1/account/merge/initiate")
                 .with(authentication(auth))
@@ -57,7 +57,7 @@ class AccountMergeControllerTest {
             .andExpect(jsonPath("$.code").value(0))
             .andExpect(jsonPath("$.data.mergeRequestId").value(1))
             .andExpect(jsonPath("$.data.secondaryUserId").value("usr_secondary"))
-            .andExpect(jsonPath("$.data.verificationToken").value("merge-token"))
+            .andExpect(jsonPath("$.data.verificationToken").doesNotExist())
             .andExpect(jsonPath("$.data.expiresAt").value("2026-03-12T22:30:00Z"));
     }
 

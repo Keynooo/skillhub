@@ -3988,7 +3988,6 @@ export interface components {
             /** Format: int64 */
             mergeRequestId?: number;
             secondaryUserId?: string;
-            verificationToken?: string;
             expiresAt?: string;
         };
         ConfirmMergeRequest: {

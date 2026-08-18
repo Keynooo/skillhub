@@ -7,6 +7,7 @@ import com.iflytek.skillhub.auth.entity.UserRoleBinding;
 import com.iflytek.skillhub.auth.exception.AuthFlowException;
 import com.iflytek.skillhub.auth.local.LocalCredential;
 import com.iflytek.skillhub.auth.local.LocalCredentialRepository;
+import com.iflytek.skillhub.auth.local.PasswordResetProperties;
 import com.iflytek.skillhub.auth.repository.ApiTokenRepository;
 import com.iflytek.skillhub.auth.repository.IdentityBindingRepository;
 import com.iflytek.skillhub.auth.repository.UserRoleBindingRepository;
@@ -16,6 +17,7 @@ import com.iflytek.skillhub.domain.namespace.NamespaceRole;
 import com.iflytek.skillhub.domain.user.UserAccount;
 import com.iflytek.skillhub.domain.user.UserAccountRepository;
 import com.iflytek.skillhub.domain.user.UserStatus;
+import com.iflytek.skillhub.mail.ResendEmailSender;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
@@ -27,10 +29,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * Coordinates account merge requests and consolidates credentials, bindings,
@@ -38,6 +45,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class AccountMergeService {
+
+    private static final Logger log = LoggerFactory.getLogger(AccountMergeService.class);
 
     private static final Comparator<NamespaceRole> NAMESPACE_ROLE_ORDER = Comparator.comparingInt(role -> switch (role) {
         case MEMBER -> 0;
@@ -54,6 +63,9 @@ public class AccountMergeService {
     private final NamespaceMemberRepository namespaceMemberRepository;
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
+    private final JavaMailSender mailSender;
+    private final PasswordResetProperties emailProperties;
+    private final ResendEmailSender resendEmailSender;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AccountMergeService(AccountMergeRequestRepository mergeRequestRepository,
@@ -64,7 +76,10 @@ public class AccountMergeService {
                                ApiTokenRepository apiTokenRepository,
                                NamespaceMemberRepository namespaceMemberRepository,
                                PasswordEncoder passwordEncoder,
-                               Clock clock) {
+                               Clock clock,
+                               JavaMailSender mailSender,
+                               PasswordResetProperties emailProperties,
+                               ResendEmailSender resendEmailSender) {
         this.mergeRequestRepository = mergeRequestRepository;
         this.userAccountRepository = userAccountRepository;
         this.localCredentialRepository = localCredentialRepository;
@@ -74,9 +89,12 @@ public class AccountMergeService {
         this.namespaceMemberRepository = namespaceMemberRepository;
         this.passwordEncoder = passwordEncoder;
         this.clock = clock;
+        this.mailSender = mailSender;
+        this.emailProperties = emailProperties;
+        this.resendEmailSender = resendEmailSender;
     }
 
-    public record InitiationResult(Long mergeRequestId, String secondaryUserId, String verificationToken, Instant expiresAt) {}
+    public record InitiationResult(Long mergeRequestId, String secondaryUserId, Instant expiresAt) {}
 
     @Transactional
     public InitiationResult initiate(String primaryUserId, String secondaryIdentifier) {
@@ -97,6 +115,11 @@ public class AccountMergeService {
             throw new AuthFlowException(HttpStatus.CONFLICT, "error.auth.merge.localCredentialConflict");
         }
 
+        String secondaryEmail = secondaryUser.getEmail();
+        if (secondaryEmail == null || secondaryEmail.isBlank()) {
+            throw new AuthFlowException(HttpStatus.BAD_REQUEST, "error.auth.merge.secondaryEmailRequired");
+        }
+
         String rawToken = generateVerificationToken();
         AccountMergeRequest request = new AccountMergeRequest(
             primaryUserId,
@@ -105,7 +128,8 @@ public class AccountMergeService {
             currentTime().plus(Duration.ofMinutes(30))
         );
         request = mergeRequestRepository.save(request);
-        return new InitiationResult(request.getId(), secondaryUser.getId(), rawToken, request.getTokenExpiresAt());
+        sendVerificationTokenEmail(secondaryEmail, rawToken);
+        return new InitiationResult(request.getId(), secondaryUser.getId(), request.getTokenExpiresAt());
     }
 
     @Transactional
@@ -284,5 +308,44 @@ public class AccountMergeService {
 
     private Instant currentTime() {
         return Instant.now(clock);
+    }
+
+    private void sendVerificationTokenEmail(String email, String token) {
+        if (resendEmailSender.isEnabled()) {
+            try {
+                resendEmailSender.send(resolveFromAddress(), email,
+                        "SkillHub account merge verification token",
+                        buildVerificationTokenBody(token));
+                return;
+            } catch (Exception ex) {
+                log.error("Resend failed for {} (merge token), trying SMTP fallback", email, ex);
+            }
+        }
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setFrom(resolveFromAddress());
+        message.setTo(email);
+        message.setSubject("SkillHub account merge verification token");
+        message.setText(buildVerificationTokenBody(token));
+        try {
+            mailSender.send(message);
+            log.info("Account merge verification token sent to {}", email);
+        } catch (Exception ex) {
+            log.error("Failed to send account merge verification token to {}", email, ex);
+            throw new AuthFlowException(HttpStatus.INTERNAL_SERVER_ERROR, "error.auth.merge.email.failed");
+        }
+    }
+
+    private String resolveFromAddress() {
+        String fromAddress = emailProperties.getEmailFromAddress();
+        if (!StringUtils.hasText(emailProperties.getEmailFromName())) {
+            return fromAddress;
+        }
+        return emailProperties.getEmailFromName() + " <" + fromAddress + ">";
+    }
+
+    private String buildVerificationTokenBody(String token) {
+        return "Your SkillHub account merge verification token is: " + token
+                + "\n\nThis token expires in 30 minutes."
+                + "\n\nIf you did not request an account merge, please ignore this email.";
     }
 }
