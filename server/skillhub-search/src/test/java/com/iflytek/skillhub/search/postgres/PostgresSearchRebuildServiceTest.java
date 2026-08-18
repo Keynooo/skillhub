@@ -266,6 +266,50 @@ class PostgresSearchRebuildServiceTest {
     }
 
     @Test
+    void rebuildBySkill_shouldIndexTranslatedChineseSummary() {
+        SkillRepository skillRepository = mock(SkillRepository.class);
+        NamespaceRepository namespaceRepository = mock(NamespaceRepository.class);
+        SkillVersionRepository skillVersionRepository = mock(SkillVersionRepository.class);
+        SearchIndexService searchIndexService = mock(SearchIndexService.class);
+
+        Skill skill = new Skill(7L, "weather", "owner-1", SkillVisibility.PUBLIC);
+        skill.setDisplayName("Weather");
+        skill.setSummary("Retrieve and summarize current weather and forecasts");
+        skill.setSummaryZh("检索并总结当前天气和预报");
+        skill.setLatestVersionId(102L);
+
+        Namespace namespace = new Namespace("team-ai", "Team AI", "owner-1");
+        SkillVersion version = new SkillVersion(1L, "1.0.0", "owner-1");
+        version.setParsedMetadataJson("""
+                {
+                  "name": "Weather",
+                  "description": "Retrieve and summarize current weather",
+                  "version": "1.0.0",
+                  "frontmatter": {}
+                }
+                """);
+
+        when(skillRepository.findById(1L)).thenReturn(Optional.of(skill));
+        when(namespaceRepository.findById(7L)).thenReturn(Optional.of(namespace));
+        when(skillVersionRepository.findById(102L)).thenReturn(Optional.of(version));
+
+        PostgresSearchRebuildService service = newService(
+                skillRepository,
+                namespaceRepository,
+                skillVersionRepository,
+                searchIndexService
+        );
+
+        service.rebuildBySkill(1L);
+
+        ArgumentCaptor<SkillSearchDocument> captor = ArgumentCaptor.forClass(SkillSearchDocument.class);
+        verify(searchIndexService).index(captor.capture());
+
+        SkillSearchDocument document = captor.getValue();
+        assertThat(document.searchText()).contains("检索并总结当前天气和预报");
+    }
+
+    @Test
     void rebuildBySkill_shouldAppendLabelTranslationsIntoKeywords() {
         SkillRepository skillRepository = mock(SkillRepository.class);
         NamespaceRepository namespaceRepository = mock(NamespaceRepository.class);

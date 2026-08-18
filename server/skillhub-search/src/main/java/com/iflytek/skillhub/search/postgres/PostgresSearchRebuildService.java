@@ -123,6 +123,7 @@ public class PostgresSearchRebuildService implements SearchRebuildService {
         List<String> searchParts = new ArrayList<>();
         addPart(searchParts, skill.getSlug());
         addPart(searchParts, skill.getSummary());
+        addPart(searchParts, skill.getSummaryZh());
 
         Set<String> keywords = new TreeSet<>();
         resolveLatestVersion(skill)

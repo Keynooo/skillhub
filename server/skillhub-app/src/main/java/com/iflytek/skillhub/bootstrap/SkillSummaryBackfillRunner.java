@@ -3,6 +3,7 @@ package com.iflytek.skillhub.bootstrap;
 import com.iflytek.skillhub.domain.skill.Skill;
 import com.iflytek.skillhub.domain.skill.SkillRepository;
 import com.iflytek.skillhub.domain.skill.SummaryTranslator;
+import com.iflytek.skillhub.search.SearchRebuildService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -40,11 +41,14 @@ public class SkillSummaryBackfillRunner {
 
     private final SkillRepository skillRepository;
     private final SummaryTranslator summaryTranslator;
+    private final SearchRebuildService searchRebuildService;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
-    public SkillSummaryBackfillRunner(SkillRepository skillRepository, SummaryTranslator summaryTranslator) {
+    public SkillSummaryBackfillRunner(SkillRepository skillRepository, SummaryTranslator summaryTranslator,
+                                      SearchRebuildService searchRebuildService) {
         this.skillRepository = skillRepository;
         this.summaryTranslator = summaryTranslator;
+        this.searchRebuildService = searchRebuildService;
     }
 
     @Async("skillhubEventExecutor")
@@ -87,6 +91,7 @@ public class SkillSummaryBackfillRunner {
                     }
                     skill.setSummaryZh(translatedText);
                     skillRepository.save(skill);
+                    searchRebuildService.rebuildBySkill(skill.getId());
                     translated++;
                 } catch (RuntimeException e) {
                     log.warn("Failed to backfill summary translation for skillId={}: {}",
