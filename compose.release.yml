@@ -133,13 +133,19 @@ services:
       SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_IMAGE: ${SKILLHUB_SANDBOX_IMAGE:-ghcr.io/iflytek/skillhub-sandbox}:${SKILLHUB_VERSION:-latest}
       SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_NETWORK: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_NETWORK:-bridge}
       SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_MAX_CONCURRENCY: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_MAX_CONCURRENCY:-4}
+    group_add:
+      # The non-root `app` user must be in the host's `docker` group to talk to
+      # /var/run/docker.sock. The gid varies by host (984 on the 副 server); set
+      # SKILLHUB_DOCKER_GID to match if deploying elsewhere.
+      - "${SKILLHUB_DOCKER_GID:-984}"
     volumes:
       - skillhub_storage:/var/lib/skillhub/storage
       # DinD: the server spawns forkprobe sandbox containers via `docker run`,
       # so it needs the host daemon socket. NOTE: this grants the server
-      # container control of the host Docker daemon — keep the socket read-only
-      # and treat the server container as a privileged trust boundary.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # container control of the host Docker daemon — treat it as a privileged
+      # trust boundary. The socket must be read-write (the Docker CLI writes
+      # over it); access is scoped to `app` via group_add above.
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy

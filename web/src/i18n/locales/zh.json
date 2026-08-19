@@ -1668,6 +1668,8 @@
     "incomplete": "未完成",
     "incompleteHint": "该 skill 未返回结果（执行超时或仍在运行中）。",
     "viewingHint": "正在查看 {{name}}，点击左侧其他候选可切换输出。",
-    "noResults": "没有结果可显示。"
+    "noResults": "没有结果可显示。",
+    "deliverableFiles": "交付文件",
+    "downloadFile": "下载"
   }
 }

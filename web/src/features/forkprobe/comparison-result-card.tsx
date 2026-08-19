@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { CheckCircle, AlertTriangle, Clock, Loader2, XCircle } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import { ForkprobeOutput } from './forkprobe-output'
+import { ForkprobeFileList } from './forkprobe-files'
 import { SkillAppliedBadge } from './skill-applied-badge'
 import type { CandidateResult } from './forkprobe-api'
 
@@ -101,6 +102,13 @@ export function ComparisonResultCard({ result, index }: ComparisonResultCardProp
           style={{ background: 'hsl(var(--secondary))' }}
         >
           <ForkprobeOutput content={result.output} />
+        </div>
+      )}
+
+      {/* Deliverable files (sandbox /output) */}
+      {isCompleted && result.files && result.files.length > 0 && (
+        <div className="mt-3 border-t border-border/60 pt-3">
+          <ForkprobeFileList files={result.files} />
         </div>
       )}
 

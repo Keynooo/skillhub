@@ -136,6 +136,8 @@ skillhub:
       sandbox-pids-limit: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_PIDS_LIMIT:256}
       sandbox-user: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_USER:65534:65534}
       sandbox-max-concurrency: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_MAX_CONCURRENCY:4}
+      sandbox-output-size: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_OUTPUT_SIZE:64m}
+      sandbox-output-max-file-bytes: ${SKILLHUB_FORKPROBE_EXECUTOR_SANDBOX_OUTPUT_MAX_FILE_BYTES:5242880}
   redis:
     sentinel:
       check-sentinels-list: ${SKILLHUB_REDIS_SENTINEL_CHECK_SENTINELS_LIST:true}

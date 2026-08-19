@@ -1,7 +1,9 @@
 package com.iflytek.skillhub.service.forkprobe;
 
+import com.iflytek.skillhub.dto.forkprobe.OutputFile;
 import com.iflytek.skillhub.service.AnthropicService;
 
+import java.util.List;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -49,6 +51,12 @@ interface SkillExecutor {
             String output,
             int tokensUsed,
             float latencySeconds,
-            String error
-    ) {}
+            String error,
+            List<OutputFile> files
+    ) {
+        /** Convenience constructor: no deliverable files (prompt-as-skill / subprocess paths). */
+        SkillResult(String output, int tokensUsed, float latencySeconds, String error) {
+            this(output, tokensUsed, latencySeconds, error, List.of());
+        }
+    }
 }

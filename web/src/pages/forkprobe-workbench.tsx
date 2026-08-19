@@ -30,6 +30,7 @@ import type { CandidateResult } from '@/features/forkprobe/forkprobe-api'
 import type { RecommendedSkill } from '@/features/forkprobe/forkprobe-api'
 import { resolveSkillLink, resolveRecommendedSkillLink } from '@/features/forkprobe/forkprobe-api'
 import { ForkprobeOutput } from '@/features/forkprobe/forkprobe-output'
+import { ForkprobeFileList } from '@/features/forkprobe/forkprobe-files'
 import { ComparisonHistory } from '@/features/forkprobe/comparison-history'
 import { SkillAppliedBadge } from '@/features/forkprobe/skill-applied-badge'
 
@@ -704,6 +705,11 @@ export function ForkprobeWorkbenchPage() {
                   <p className="font-semibold mb-1">{t('forkprobe.incomplete')}</p>
                   <p>{t('forkprobe.incompleteHint')}</p>
                 </div>
+              )}
+
+              {/* Deliverable files (sandbox /output) */}
+              {activeResult.files && activeResult.files.length > 0 && (
+                <ForkprobeFileList files={activeResult.files} />
               )}
 
               {/* Tab-switch hint */}

@@ -31,6 +31,13 @@ export interface CompareResponse {
   createdAt: string
 }
 
+export interface ForkprobeOutputFile {
+  name: string
+  sizeBytes: number
+  contentType: string
+  contentBase64: string
+}
+
 export interface CandidateResult {
   skillCoordinate: string
   skillName: string
@@ -43,6 +50,8 @@ export interface CandidateResult {
   error: string | null
   /** GitHub source URL for catalog skills; null for SkillHub skills / baseline. */
   sourceUrl: string | null
+  /** Deliverable files the sandbox run wrote to /output (base64-encoded). */
+  files?: ForkprobeOutputFile[]
 }
 
 export interface ReviewScore {

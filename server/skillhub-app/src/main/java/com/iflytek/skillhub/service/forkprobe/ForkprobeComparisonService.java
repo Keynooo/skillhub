@@ -13,6 +13,7 @@ import com.iflytek.skillhub.dto.forkprobe.CandidateResult;
 import com.iflytek.skillhub.dto.forkprobe.CompareResponse;
 import com.iflytek.skillhub.dto.forkprobe.ComparisonHistoryItem;
 import com.iflytek.skillhub.dto.forkprobe.ComparisonStatusResponse;
+import com.iflytek.skillhub.dto.forkprobe.OutputFile;
 import com.iflytek.skillhub.dto.forkprobe.RecommendedSkill;
 import com.iflytek.skillhub.dto.forkprobe.ReviewResult;
 import com.iflytek.skillhub.dto.forkprobe.ReviewScore;
@@ -487,13 +488,13 @@ public class ForkprobeComparisonService {
                         // Skill not started yet
                         return new CandidateResult(
                                 spec.coordinate(), spec.name(), null, 0, 0, null, null, null,
-                                spec.sourceUrl());
+                                spec.sourceUrl(), List.of());
                     }
                     if (!result.isCompleted()) {
                         return new CandidateResult(
                                 spec.coordinate(), spec.name(), null, 0,
                                 result.getLatencySeconds(), null, null, null,
-                                spec.sourceUrl());
+                                spec.sourceUrl(), List.of());
                     }
                     return new CandidateResult(
                             spec.coordinate(),
@@ -504,7 +505,8 @@ public class ForkprobeComparisonService {
                             result.getSkillApplied(),
                             result.getAppliedReason(),
                             result.getError(),
-                            spec.sourceUrl()
+                            spec.sourceUrl(),
+                            result.getFiles()
                     );
                 })
                 .collect(Collectors.toList());
@@ -609,7 +611,8 @@ public class ForkprobeComparisonService {
                                 ? node.path("skillApplied").asBoolean() : null,
                         nullableText(node, "appliedReason"),
                         nullableText(node, "error"),
-                        nullableText(node, "sourceUrl")));
+                        nullableText(node, "sourceUrl"),
+                        parseFiles(node)));
             }
             return results;
         } catch (Exception e) {
@@ -626,6 +629,30 @@ public class ForkprobeComparisonService {
     private static String nullableText(JsonNode node, String field) {
         JsonNode v = node.get(field);
         return v == null || v.isNull() ? null : v.asText();
+    }
+
+    /**
+     * Deserialize the {@code files} array of a persisted candidate result back into
+     * {@link OutputFile} records (base64 content is stored inline in the JSON).
+     */
+    private static List<OutputFile> parseFiles(JsonNode node) {
+        JsonNode files = node.get("files");
+        if (files == null || !files.isArray()) {
+            return List.of();
+        }
+        List<OutputFile> out = new ArrayList<>();
+        for (JsonNode f : files) {
+            String name = nullableText(f, "name");
+            if (name == null || name.isBlank()) {
+                continue;
+            }
+            out.add(new OutputFile(
+                    name,
+                    f.path("sizeBytes").asLong(0),
+                    nullableText(f, "contentType"),
+                    nullableText(f, "contentBase64")));
+        }
+        return out;
     }
 
     /**
@@ -793,6 +820,7 @@ public class ForkprobeComparisonService {
             result.setOutput(sr.output());
             result.setTokensUsed(sr.tokensUsed());
             result.setLatencySeconds(sr.latencySeconds());
+            result.setFiles(sr.files());
 
             if (sr.error() != null) {
                 result.setError(sr.error());
@@ -803,7 +831,7 @@ public class ForkprobeComparisonService {
             // skill, so it stays null and renders no "skill applied" badge)
             if (!"baseline".equals(spec.coordinate())) {
                 Boolean applied = skillExecutor.verify(
-                        sr.output(), spec.name(), spec.systemPrompt(), run.getTarget());
+                        buildVerificationOutput(sr), spec.name(), spec.systemPrompt(), run.getTarget());
                 result.setSkillApplied(applied);
                 result.setAppliedReason(applied == null ? null
                         : applied ? "技能方法已应用于输出" : "该 skill 未调用");
@@ -813,6 +841,58 @@ public class ForkprobeComparisonService {
             float latency = (System.currentTimeMillis() - start.toEpochMilli()) / 1000.0f;
             result.setError(e.getMessage());
             result.setLatencySeconds(latency);
+        }
+    }
+
+    /**
+     * Build the text handed to the skill-applied verifier. In sandbox (docker) mode the
+     * real deliverable is often a file (HTML, image, data table) written to {@code /output},
+     * while {@code output} is only a terse summary ("已完成，文件见 /output/x.html"). Judging
+     * just that summary wrongly scores the skill as "not applied" for lack of evidence. Append
+     * the deliverable file names plus a short decoded preview (for text files) so the verifier
+     * can see the actual work. The stored/displayed {@code output} is left untouched.
+     */
+    private String buildVerificationOutput(SkillExecutor.SkillResult sr) {
+        List<OutputFile> files = sr.files();
+        if (files == null || files.isEmpty()) {
+            return sr.output();
+        }
+        StringBuilder sb = new StringBuilder(sr.output() == null ? "" : sr.output());
+        sb.append("\n\n交付文件清单：\n");
+        for (OutputFile f : files) {
+            sb.append("- ").append(f.name())
+                    .append(" (").append(f.sizeBytes()).append(" bytes, ").append(f.contentType()).append(")\n");
+            String preview = textPreview(f);
+            if (!preview.isBlank()) {
+                sb.append(preview).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Decode a text deliverable and return a short UTF-8 preview, or "" for binary content
+     * (image/audio/…) or anything that doesn't decode as UTF-8. Capped so the verification
+     * prompt stays small.
+     */
+    private static String textPreview(OutputFile f) {
+        String type = f.contentType() == null ? "" : f.contentType().toLowerCase();
+        boolean textLike = type.startsWith("text/")
+                || type.contains("json") || type.contains("xml")
+                || type.contains("svg") || type.contains("html")
+                || type.contains("javascript") || type.contains("yaml")
+                || type.contains("csv");
+        if (!textLike && !type.isBlank()) {
+            return "";
+        }
+        try {
+            byte[] bytes = Base64.getDecoder().decode(f.contentBase64());
+            String text = new String(bytes, StandardCharsets.UTF_8);
+            int cap = 600;
+            String preview = text.length() > cap ? text.substring(0, cap) + "\n…(截断)…" : text;
+            return "  内容预览：\n" + preview;
+        } catch (Exception e) {
+            return "";
         }
     }
 

@@ -20,6 +20,9 @@ RUN ./mvnw package -DskipTests -B
 
 # ---- Runtime Stage ----
 FROM eclipse-temurin:21-jre-alpine
+# docker-cli lets the server spawn forkprobe sandbox containers via the mounted
+# /var/run/docker.sock (Docker-out-of-Docker). Client only — no daemon inside the image.
+RUN apk add --no-cache docker-cli
 RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app
 

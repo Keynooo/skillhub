@@ -1667,6 +1667,8 @@
     "incomplete": "Incomplete",
     "incompleteHint": "This skill did not return a result (timed out or still running).",
     "viewingHint": "Viewing {{name}}. Click another candidate on the left to switch output.",
-    "noResults": "No results to display."
+    "noResults": "No results to display.",
+    "deliverableFiles": "Deliverable files",
+    "downloadFile": "Download"
   }
 }

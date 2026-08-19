@@ -5,7 +5,6 @@ import com.iflytek.skillhub.config.ForkprobeExecutorProperties;
 import com.iflytek.skillhub.service.AnthropicService;
 import org.junit.jupiter.api.Test;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 
@@ -25,9 +24,10 @@ class DockerSandboxSkillExecutorTest {
     @Test
     void buildDockerCommandIncludesAllIsolationFlags() {
         DockerSandboxSkillExecutor executor = newExecutor(new ForkprobeExecutorProperties());
-        List<String> cmd = executor.buildDockerCommand(Path.of("/tmp/skill"));
+        List<String> cmd = executor.buildDockerCommand();
 
-        assertTrue(cmd.contains("--rm"), "container must auto-remove");
+        assertFalse(cmd.contains("--rm"), "no --rm — deliverable files are docker cp'd out before docker rm");
+        assertTrue(cmd.contains("--name"), "named container so files can be extracted via docker cp");
         assertTrue(cmd.contains("-i"), "must attach stdin so the prompt reaches claude -p");
         assertTrue(cmd.contains("--read-only"), "root fs must be read-only");
         assertTrue(cmd.contains("--cap-drop=ALL"), "must drop all capabilities");
@@ -47,20 +47,48 @@ class DockerSandboxSkillExecutorTest {
     }
 
     @Test
-    void buildDockerCommandMountsSkillReadOnly() {
+    void buildDockerCommandMountsOutputVolume() {
         DockerSandboxSkillExecutor executor = newExecutor(new ForkprobeExecutorProperties());
-        List<String> cmd = executor.buildDockerCommand(Path.of("/tmp/skillhub-forkprobe-123/skill"));
+        List<String> cmd = executor.buildDockerCommand();
 
-        int volIdx = cmd.indexOf("-v");
-        assertTrue(volIdx >= 0 && volIdx + 1 < cmd.size(), "volume mount present");
-        String mount = cmd.get(volIdx + 1);
-        assertTrue(mount.endsWith(":/skill:ro"), "skill must mount read-only, got: " + mount);
+        int vIdx = cmd.indexOf("-v");
+        assertTrue(vIdx >= 0 && vIdx + 1 < cmd.size(), "named volume flag present");
+        assertEquals("skillhub-out-test:/output", cmd.get(vIdx + 1),
+                "deliverable files mount at /output via a named volume");
+    }
+
+    @Test
+    void buildDockerCommandUsesNamedVolumeNotBindMount() {
+        DockerSandboxSkillExecutor executor = newExecutor(new ForkprobeExecutorProperties());
+        List<String> cmd = executor.buildDockerCommand();
+
+        // The only -v is a named volume for /output (source is a bare volume name, not a
+        // host path) — a host bind-mount would not resolve under DooD.
+        for (int i = 0; i < cmd.size(); i++) {
+            if ("-v".equals(cmd.get(i)) && i + 1 < cmd.size()) {
+                String spec = cmd.get(i + 1);
+                assertFalse(spec.startsWith("/"), "no host bind-mount: " + spec);
+                assertFalse(spec.matches("^[A-Za-z]:.*"), "no Windows bind-mount: " + spec);
+            }
+        }
+        assertFalse(cmd.contains("--add-dir"), "no --add-dir — skill is delivered inline in the prompt");
+    }
+
+    @Test
+    void buildTaskPromptEmbedsSkillContent() {
+        DockerSandboxSkillExecutor executor = newExecutor(new ForkprobeExecutorProperties());
+        String prompt = executor.buildTaskPrompt("查天气方法论内容", "帮我查天气", "weather");
+
+        assertTrue(prompt.contains("查天气方法论内容"), "prompt must embed the full SKILL.md methodology");
+        assertTrue(prompt.contains("帮我查天气"), "prompt must embed the task");
+        assertTrue(prompt.contains("weather"), "prompt must name the skill");
+        assertTrue(prompt.contains("/output"), "prompt must direct deliverable files to /output");
     }
 
     @Test
     void buildDockerCommandPassesAnthropicEnv() {
         DockerSandboxSkillExecutor executor = newExecutor(new ForkprobeExecutorProperties());
-        List<String> cmd = executor.buildDockerCommand(Path.of("/tmp/skill"));
+        List<String> cmd = executor.buildDockerCommand();
 
         assertTrue(cmd.contains("ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic"),
                 "base URL env passed");
@@ -75,7 +103,7 @@ class DockerSandboxSkillExecutorTest {
         DockerSandboxSkillExecutor executor = new DockerSandboxSkillExecutor(
                 anthropicService, anthropicProps, new ForkprobeExecutorProperties(), new Semaphore(4));
 
-        List<String> cmd = executor.buildDockerCommand(Path.of("/tmp/skill"));
+        List<String> cmd = executor.buildDockerCommand();
         assertFalse(cmd.stream().anyMatch(a -> a.startsWith("ANTHROPIC_API_KEY=")),
                 "blank api key must not be passed");
     }

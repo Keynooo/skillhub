@@ -65,6 +65,12 @@ public class ForkprobeExecutorProperties {
     /** Maximum number of sandbox containers across all comparisons (global concurrency cap). */
     private int sandboxMaxConcurrency = 4;
 
+    /** tmpfs size for the sandbox's {@code /output} deliverable dir ({@code docker run --tmpfs}). */
+    private String sandboxOutputSize = "64m";
+
+    /** Max bytes per deliverable file to embed (base64) in the comparison result; larger files are skipped. */
+    private long sandboxOutputMaxFileBytes = 5 * 1024 * 1024;
+
     public String getMode() {
         return mode;
     }
@@ -175,5 +181,21 @@ public class ForkprobeExecutorProperties {
 
     public void setSandboxMaxConcurrency(int sandboxMaxConcurrency) {
         this.sandboxMaxConcurrency = sandboxMaxConcurrency;
+    }
+
+    public String getSandboxOutputSize() {
+        return sandboxOutputSize;
+    }
+
+    public void setSandboxOutputSize(String sandboxOutputSize) {
+        this.sandboxOutputSize = sandboxOutputSize;
+    }
+
+    public long getSandboxOutputMaxFileBytes() {
+        return sandboxOutputMaxFileBytes;
+    }
+
+    public void setSandboxOutputMaxFileBytes(long sandboxOutputMaxFileBytes) {
+        this.sandboxOutputMaxFileBytes = sandboxOutputMaxFileBytes;
     }
 }

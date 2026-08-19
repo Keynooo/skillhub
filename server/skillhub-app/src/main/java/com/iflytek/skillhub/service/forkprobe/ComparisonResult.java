@@ -1,5 +1,9 @@
 package com.iflytek.skillhub.service.forkprobe;
 
+import com.iflytek.skillhub.dto.forkprobe.OutputFile;
+
+import java.util.List;
+
 /**
  * Result of executing a single skill against a task.
  */
@@ -13,6 +17,7 @@ class ComparisonResult {
     private Boolean skillApplied; // null = not verified yet, true = ✅, false = ⚠️
     private String appliedReason;
     private String error;
+    private List<OutputFile> files = List.of();
 
     ComparisonResult(String skillCoordinate, String skillName) {
         this.skillCoordinate = skillCoordinate;
@@ -73,6 +78,14 @@ class ComparisonResult {
 
     void setError(String error) {
         this.error = error;
+    }
+
+    List<OutputFile> getFiles() {
+        return files;
+    }
+
+    void setFiles(List<OutputFile> files) {
+        this.files = files == null ? List.of() : files;
     }
 
     boolean isCompleted() {
