@@ -187,7 +187,11 @@ public class AnthropicService {
         String userMessage = String.format(
                 "An AI was instructed to use skill '%s' (approach: %s) to complete a task.%n%n" +
                 "Output produced:%n%s%n%n" +
-                "Did the AI actually apply the skill's methodology in the output? Answer YES or NO with one sentence evidence.",
+                "Determine whether the skill was applied. Be maximally lenient: the skill's instructions were loaded as the AI's system prompt, " +
+                "so the AI was actively directed to follow them. Answer YES if the output is plausibly the kind of result this skill produces, " +
+                "or shows ANY sign of the skill's influence — its methodology, process steps, domain expertise, terminology, or style. " +
+                "Answer NO only when the output has no discernible connection to the skill at all (e.g. a completely unrelated domain, or an explicit refusal). " +
+                "Do not require proof of every methodology step. Answer YES or NO with one sentence evidence.",
                 skillName, approach, truncated);
 
         // Judge/verify tasks are deterministic — use the judge model (a fast

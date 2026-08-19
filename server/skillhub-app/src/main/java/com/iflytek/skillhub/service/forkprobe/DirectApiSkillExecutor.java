@@ -81,6 +81,7 @@ class DirectApiSkillExecutor implements SkillExecutor {
                             target.model(), target.baseUrl(), target.apiKey())
                     : anthropicService.sendVerification(output, skillName, approach);
             String verdict = response.content().trim().toUpperCase();
+            log.info("Skill verification verdict for '{}': [{}]", skillName, response.content().trim());
             return verdict.startsWith("YES");
         } catch (Exception e) {
             log.warn("Skill verification failed for '{}': {}", skillName, e.getMessage());
