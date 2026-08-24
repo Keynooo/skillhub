@@ -13,6 +13,8 @@ public interface ForkprobeComparisonRepository {
 
     ForkprobeComparison save(ForkprobeComparison comparison);
 
+    void delete(ForkprobeComparison comparison);
+
     Optional<ForkprobeComparison> findByComparisonId(String comparisonId);
 
     /**

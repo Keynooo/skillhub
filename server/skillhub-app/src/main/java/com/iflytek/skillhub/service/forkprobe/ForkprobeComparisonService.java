@@ -558,6 +558,22 @@ public class ForkprobeComparisonService {
         return Optional.of(toStatusResponse(row.get()));
     }
 
+    /**
+     * Delete a persisted comparison run, scoped to the owning user. Returns false
+     * if the run doesn't exist or belongs to another user.
+     */
+    public boolean deleteHistory(String userId, String comparisonId) {
+        if (userId == null || userId.isBlank()) {
+            return false;
+        }
+        Optional<ForkprobeComparison> row = comparisonRepository.findByComparisonId(comparisonId);
+        if (row.isEmpty() || !userId.equals(row.get().getUserId())) {
+            return false;
+        }
+        comparisonRepository.delete(row.get());
+        return true;
+    }
+
     private ComparisonHistoryItem toHistoryItem(ForkprobeComparison row) {
         return new ComparisonHistoryItem(
                 row.getComparisonId(),

@@ -7,6 +7,7 @@ import {
   getForkprobeConfig,
   getComparisonHistory,
   getComparisonHistoryDetail,
+  deleteComparisonHistory,
   type ComparisonStatusResponse,
   type CompareResponse,
 } from './forkprobe-api'
@@ -131,5 +132,19 @@ export function useForkprobeHistoryDetail(comparisonId: string | null) {
     queryKey: forkprobeKeys.historyDetail(comparisonId!),
     queryFn: () => getComparisonHistoryDetail(comparisonId!),
     enabled: !!comparisonId,
+  })
+}
+
+/**
+ * Delete a persisted comparison run; refreshes the history list on success.
+ */
+export function useDeleteForkprobeHistory() {
+  const queryClient = useQueryClient()
+
+  return useMutation<void, Error, string>({
+    mutationFn: (comparisonId) => deleteComparisonHistory(comparisonId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: forkprobeKeys.history() })
+    },
   })
 }

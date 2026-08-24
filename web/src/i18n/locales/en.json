@@ -1669,6 +1669,11 @@
     "viewingHint": "Viewing {{name}}. Click another candidate on the left to switch output.",
     "noResults": "No results to display.",
     "deliverableFiles": "Deliverable files",
-    "downloadFile": "Download"
+    "downloadFile": "Download",
+    "selectAll": "Select all",
+    "deleteSelected": "Delete ({{n}})",
+    "deleteHistoryTitle": "Delete comparison history",
+    "deleteHistoryConfirm": "Delete the selected {{n}} run(s)? This cannot be undone.",
+    "select": "Select"
   }
 }

@@ -72,6 +72,7 @@ public class RouteSecurityPolicyRegistry {
             RouteAuthorizationPolicy.authenticated(HttpMethod.POST, "/api/web/forkprobe/recommend"),
             RouteAuthorizationPolicy.authenticated(HttpMethod.POST, "/api/web/forkprobe/compare"),
             RouteAuthorizationPolicy.authenticated(HttpMethod.GET, "/api/web/forkprobe/compare/*"),
+            RouteAuthorizationPolicy.authenticated(HttpMethod.DELETE, "/api/web/forkprobe/history/*"),
             RouteAuthorizationPolicy.roles(HttpMethod.DELETE, "/api/v1/skills/id/*", "SUPER_ADMIN"),
             RouteAuthorizationPolicy.roles(HttpMethod.DELETE, "/api/v1/skills/*/*", "SUPER_ADMIN"),
             RouteAuthorizationPolicy.authenticated(HttpMethod.DELETE, "/api/web/skills/id/*"),

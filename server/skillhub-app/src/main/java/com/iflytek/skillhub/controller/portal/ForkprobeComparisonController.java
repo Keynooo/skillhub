@@ -142,4 +142,19 @@ public class ForkprobeComparisonController extends BaseApiController {
         }
         return ResponseEntity.ok(ok("response.success.read", status.get()));
     }
+
+    /**
+     * Delete a persisted comparison run, scoped to the owning user. Returns 404
+     * if the run doesn't exist or belongs to another user.
+     */
+    @DeleteMapping("/history/{comparisonId}")
+    public ResponseEntity<ApiResponse<Void>> deleteHistory(
+            @PathVariable String comparisonId,
+            @RequestAttribute(value = "userId", required = false) String userId) {
+        boolean deleted = comparisonService.deleteHistory(userId, comparisonId);
+        if (!deleted) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(ok("response.success.deleted", null));
+    }
 }

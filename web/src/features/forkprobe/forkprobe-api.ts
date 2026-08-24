@@ -212,3 +212,9 @@ export async function getComparisonHistoryDetail(
     `${BASE}/history/${encodeURIComponent(comparisonId)}`,
   )
 }
+
+export async function deleteComparisonHistory(comparisonId: string): Promise<void> {
+  return fetchJson<void>(`${BASE}/history/${encodeURIComponent(comparisonId)}`, {
+    method: 'DELETE',
+  })
+}

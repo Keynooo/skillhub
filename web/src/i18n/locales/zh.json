@@ -934,7 +934,6 @@
     "submitReviewSuccessTitle": "已提交审核",
     "submitReviewSuccessDescription": "版本 {{version}} 已提交审核。",
     "submitReviewErrorTitle": "提交审核失败",
-    "withdrawReviewErrorTitle": "撤销审核失败",
     "deleteVersion": "删除版本",
     "deleteVersionConfirmTitle": "确认删除版本",
     "deleteVersionConfirmDescription": "版本 {{version}} 删除后无法恢复，确定继续吗？",
@@ -1670,6 +1669,11 @@
     "viewingHint": "正在查看 {{name}}，点击左侧其他候选可切换输出。",
     "noResults": "没有结果可显示。",
     "deliverableFiles": "交付文件",
-    "downloadFile": "下载"
+    "downloadFile": "下载",
+    "selectAll": "全选",
+    "deleteSelected": "删除（{{n}}）",
+    "deleteHistoryTitle": "删除对比记录",
+    "deleteHistoryConfirm": "确定删除选中的 {{n}} 条对比记录吗？删除后不可恢复。",
+    "select": "选择"
   }
 }

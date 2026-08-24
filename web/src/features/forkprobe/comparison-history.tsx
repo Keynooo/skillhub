@@ -3,13 +3,15 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
-import { X, History, Loader2, ChevronRight, ArrowLeft } from 'lucide-react'
+import { X, History, Loader2, ChevronRight, ArrowLeft, Trash2 } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import {
   useForkprobeHistory,
   useForkprobeHistoryDetail,
+  useDeleteForkprobeHistory,
 } from './use-forkprobe-queries'
 import { ComparisonResultCard } from './comparison-result-card'
+import { ConfirmDialog } from '@/shared/components/confirm-dialog'
 import type { ComparisonHistoryItem, ComparisonStatusResponse } from './forkprobe-api'
 
 const STATUS_KEYS: Record<string, string> = {
@@ -116,6 +118,10 @@ function HistoryList({
   onSelect: (item: ComparisonHistoryItem) => void
 }) {
   const { t, i18n } = useTranslation()
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const deleteMutation = useDeleteForkprobeHistory()
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -133,51 +139,147 @@ function HistoryList({
     )
   }
 
+  const allSelected = selected.size === history.length
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(history.map((i) => i.comparisonId)))
+  const toggleOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleDelete = async () => {
+    const ids = [...selected]
+    await Promise.all(ids.map((id) => deleteMutation.mutateAsync(id)))
+    setSelected(new Set())
+    setSelecting(false)
+  }
+
+  const exitSelecting = () => {
+    setSelecting(false)
+    setSelected(new Set())
+  }
+
   return (
-    <ul className="space-y-2">
-      {history.map((item) => {
-        const status = item.status
-        const isFailed = status === 'FAILED'
-        const isCancelled = status === 'CANCELLED'
-        return (
-          <li key={item.comparisonId}>
+    <div>
+      {/* Toolbar: plain "select" entry by default; select-all + delete in selection mode */}
+      <div className="flex items-center justify-between mb-3 h-8">
+        {selecting ? (
+          <>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleAll}
+                className="w-3.5 h-3.5 accent-[hsl(var(--primary))]"
+                aria-label={t('forkprobe.selectAll')}
+              />
+              {t('forkprobe.selectAll')}
+            </label>
+            <div className="flex items-center gap-2">
+              {selected.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={deleteMutation.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50"
+                >
+                  {deleteMutation.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3.5 h-3.5" />
+                  )}
+                  {t('forkprobe.deleteSelected', { n: selected.size })}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={exitSelecting}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:bg-secondary transition-colors"
+              >
+                {t('forkprobe.cancel')}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="ml-auto">
             <button
               type="button"
-              onClick={() => onSelect(item)}
-              className="w-full text-left px-4 py-3 rounded-xl border hover:bg-muted/50 transition-colors"
-              style={{ borderColor: 'hsl(var(--border))' }}
+              onClick={() => setSelecting(true)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:bg-secondary transition-colors"
             >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div
-                    className="text-sm font-medium truncate"
-                    style={{ color: 'hsl(var(--foreground))' }}
-                  >
-                    {item.taskDescription}
-                  </div>
-                  <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                    <span
-                      className={cn(
-                        'px-1.5 py-0.5 rounded-full font-medium',
-                        isFailed && 'bg-red-100 text-red-600',
-                        isCancelled && 'bg-gray-100 text-gray-500',
-                        !isFailed && !isCancelled && 'bg-emerald-100 text-emerald-700',
-                      )}
-                    >
-                      {STATUS_KEYS[status] ? t(STATUS_KEYS[status]) : status}
-                    </span>
-                    <span>{t('forkprobe.skillCount', { n: item.skillCount })}</span>
-                    {item.provider && <span>· {item.provider}</span>}
-                    <span>· {formatTime(item.createdAt, i18n.resolvedLanguage)}</span>
-                  </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-              </div>
+              {t('forkprobe.select')}
             </button>
-          </li>
-        )
-      })}
-    </ul>
+          </div>
+        )}
+      </div>
+
+      <ul className="space-y-2">
+        {history.map((item) => {
+          const status = item.status
+          const isFailed = status === 'FAILED'
+          const isCancelled = status === 'CANCELLED'
+          return (
+            <li key={item.comparisonId} className="flex items-center gap-2">
+              {selecting && (
+                <input
+                  type="checkbox"
+                  checked={selected.has(item.comparisonId)}
+                  onChange={() => toggleOne(item.comparisonId)}
+                  className="w-3.5 h-3.5 shrink-0 accent-[hsl(var(--primary))]"
+                  aria-label={t('forkprobe.selectAll')}
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => onSelect(item)}
+                className="flex-1 min-w-0 text-left px-4 py-3 rounded-xl border hover:bg-muted/50 transition-colors"
+                style={{ borderColor: 'hsl(var(--border))' }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className="text-sm font-medium truncate"
+                      style={{ color: 'hsl(var(--foreground))' }}
+                    >
+                      {item.taskDescription}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                      <span
+                        className={cn(
+                          'px-1.5 py-0.5 rounded-full font-medium',
+                          isFailed && 'bg-red-100 text-red-600',
+                          isCancelled && 'bg-gray-100 text-gray-500',
+                          !isFailed && !isCancelled && 'bg-emerald-100 text-emerald-700',
+                        )}
+                      >
+                        {STATUS_KEYS[status] ? t(STATUS_KEYS[status]) : status}
+                      </span>
+                      <span>{t('forkprobe.skillCount', { n: item.skillCount })}</span>
+                      {item.provider && <span>· {item.provider}</span>}
+                      <span>· {formatTime(item.createdAt, i18n.resolvedLanguage)}</span>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                </div>
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={t('forkprobe.deleteHistoryTitle')}
+        description={t('forkprobe.deleteHistoryConfirm', { n: selected.size })}
+        variant="destructive"
+        onConfirm={handleDelete}
+      />
+    </div>
   )
 }
 
