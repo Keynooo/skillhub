@@ -26,5 +26,7 @@ class ForkprobeAgentContextTest {
         assertTrue(ctx.contains("基准参照"), "role: baseline + candidates");
         assertTrue(ctx.contains("并排展示"), "purpose: side-by-side comparison");
         assertTrue(ctx.contains("不要与其他同名网站混淆"), "disambiguation for SkillHub mentions");
+        assertTrue(ctx.contains("自包含"), "output must be self-contained — readers see no tool calls");
+        assertTrue(ctx.contains("过程性描述"), "no mid-process narration like '前面两组检索'");
     }
 }
