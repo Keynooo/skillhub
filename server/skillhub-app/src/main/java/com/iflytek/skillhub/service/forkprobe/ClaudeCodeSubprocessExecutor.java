@@ -192,21 +192,21 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
             return new SkillResult("", 0, latency,
                     "Claude CLI 无输出（exit=" + exitCode + "）");
         }
-        try {
-            JsonNode root = objectMapper.readTree(stdout);
-            if (root.path("is_error").asBoolean(false)) {
-                JsonNode errors = root.path("errors");
-                String detail = errors.isArray() && errors.size() > 0
-                        ? errors.get(0).asText() : "Claude CLI 执行出错";
-                return new SkillResult("", 0, latency, detail);
-            }
-            String result = root.path("result").asText("");
-            int tokens = root.path("usage").path("output_tokens").asInt(0);
-            return new SkillResult(result, tokens, latency, result.isBlank() ? "输出为空" : null);
-        } catch (Exception e) {
-            // stdout is not JSON (e.g. CLI printed a fatal error to stderr) — surface it as text.
-            return new SkillResult(stdout.trim(), 0, latency, null);
+        JsonNode root = CliResultParser.extractResultEnvelope(objectMapper, stdout);
+        if (root == null) {
+            // stdout is not JSON (e.g. CLI printed a fatal error) — surface it as text.
+            return new SkillResult(CliResultParser.stripWarningPrefixes(stdout).trim(),
+                    0, latency, null);
         }
+        if (root.path("is_error").asBoolean(false)) {
+            JsonNode errors = root.path("errors");
+            String detail = errors.isArray() && errors.size() > 0
+                    ? errors.get(0).asText() : "Claude CLI 执行出错";
+            return new SkillResult("", 0, latency, detail);
+        }
+        String result = root.path("result").asText("");
+        int tokens = root.path("usage").path("output_tokens").asInt(0);
+        return new SkillResult(result, tokens, latency, result.isBlank() ? "输出为空" : null);
     }
 
     private static void deleteRecursively(Path dir) {

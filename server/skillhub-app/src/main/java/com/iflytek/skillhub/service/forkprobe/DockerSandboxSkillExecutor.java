@@ -396,21 +396,21 @@ class DockerSandboxSkillExecutor implements SkillExecutor {
             return new SkillResult("", 0, latency,
                     "Claude CLI 无输出（exit=" + exitCode + "）", files);
         }
-        try {
-            JsonNode root = objectMapper.readTree(stdout);
-            if (root.path("is_error").asBoolean(false)) {
-                JsonNode errors = root.path("errors");
-                String detail = errors.isArray() && errors.size() > 0
-                        ? errors.get(0).asText() : "Claude CLI 执行出错";
-                return new SkillResult("", 0, latency, detail, files);
-            }
-            String result = root.path("result").asText("");
-            int tokens = root.path("usage").path("output_tokens").asInt(0);
-            return new SkillResult(result, tokens, latency, result.isBlank() ? "输出为空" : null, files);
-        } catch (Exception e) {
+        JsonNode root = CliResultParser.extractResultEnvelope(objectMapper, stdout);
+        if (root == null) {
             // stdout is not JSON (e.g. docker/CLI printed a fatal error) — surface it as text.
-            return new SkillResult(stdout.trim(), 0, latency, null, files);
+            return new SkillResult(CliResultParser.stripWarningPrefixes(stdout).trim(),
+                    0, latency, null, files);
         }
+        if (root.path("is_error").asBoolean(false)) {
+            JsonNode errors = root.path("errors");
+            String detail = errors.isArray() && errors.size() > 0
+                    ? errors.get(0).asText() : "Claude CLI 执行出错";
+            return new SkillResult("", 0, latency, detail, files);
+        }
+        String result = root.path("result").asText("");
+        int tokens = root.path("usage").path("output_tokens").asInt(0);
+        return new SkillResult(result, tokens, latency, result.isBlank() ? "输出为空" : null, files);
     }
 
     private static float elapsedSeconds(Instant start) {
