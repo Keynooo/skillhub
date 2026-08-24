@@ -25,6 +25,8 @@ interface SelectingDraft {
   selectedSkills: string[]
   recommendations: RecommendedSkill[]
   manualSkills: RecommendedSkill[]
+  /** Metadata for selected skills, so selections survive a new recommendation round. */
+  selectedMetaSkills?: RecommendedSkill[]
 }
 
 function readActiveRun(): ActiveRun | null {
@@ -162,6 +164,12 @@ export function useForkprobeWorkbench(
   const [manualSkills, setManualSkills] = useState<RecommendedSkill[]>(
     () => restoredDraft?.manualSkills ?? [],
   )
+  // Metadata of every selected skill. A new recommendation round replaces the
+  // candidate list; without this registry a still-selected skill would vanish
+  // from the UI entirely (no way to un-select it, and it still occupies a slot).
+  const [selectedMeta, setSelectedMeta] = useState<Map<string, RecommendedSkill>>(
+    () => new Map((restoredDraft?.selectedMetaSkills ?? []).map((s) => [s.coordinate, s])),
+  )
   // Stable across renders (restoredDraft is set once via useState initializer).
   const restoredRecommendations = restoredDraft?.recommendations ?? []
 
@@ -202,8 +210,28 @@ export function useForkprobeWorkbench(
         })
       }
     }
+    // Keep still-selected skills visible (and un-selectable) even when a new
+    // recommendation round no longer includes them.
+    for (const coordinate of selectedSkills) {
+      const alreadyPresent = merged.some((r) => r.coordinate === coordinate)
+      if (!alreadyPresent) {
+        const meta = selectedMeta.get(coordinate)
+        merged.push(
+          meta ?? {
+            coordinate,
+            name: coordinate.split('/').pop() ?? coordinate,
+            namespace: '',
+            reasonZh: '此前已选择',
+            domain: 'selected',
+            source: 'selected',
+            stars: 0,
+            sourceUrl: null,
+          },
+        )
+      }
+    }
     return merged
-  }, [recommendations, manualSkills, preselectedSkills])
+  }, [recommendations, manualSkills, preselectedSkills, selectedSkills, selectedMeta])
 
   // --- Side effects for automatic transitions ---
 
@@ -258,9 +286,10 @@ export function useForkprobeWorkbench(
         selectedSkills: Array.from(selectedSkills),
         recommendations,
         manualSkills,
+        selectedMetaSkills: Array.from(selectedMeta.values()),
       })
     }
-  }, [panelState, taskDescription, provider, selectedSkills, recommendations, manualSkills])
+  }, [panelState, taskDescription, provider, selectedSkills, recommendations, manualSkills, selectedMeta])
 
   // --- Handlers ---
 
@@ -273,6 +302,23 @@ export function useForkprobeWorkbench(
 
   const handleToggleSkill = useCallback(
     (coordinate: string) => {
+      const isAdding = !selectedSkills.has(coordinate)
+      if (isAdding && selectedSkills.size >= maxSelect) return
+      if (isAdding) {
+        // Register the skill's metadata at toggle time so the selection stays
+        // visible even if later recommendation rounds drop it from the list.
+        const skill = allSkills.find((s) => s.coordinate === coordinate)
+        if (skill) {
+          setSelectedMeta((prev) => new Map(prev).set(coordinate, skill))
+        }
+      } else {
+        setSelectedMeta((prev) => {
+          if (!prev.has(coordinate)) return prev
+          const next = new Map(prev)
+          next.delete(coordinate)
+          return next
+        })
+      }
       setSelectedSkills((prev) => {
         const next = new Set(prev)
         if (next.has(coordinate)) {
@@ -283,7 +329,7 @@ export function useForkprobeWorkbench(
         return next
       })
     },
-    [maxSelect],
+    [maxSelect, selectedSkills, allSkills],
   )
 
   const handleAddSkill = useCallback(
@@ -341,6 +387,7 @@ export function useForkprobeWorkbench(
     setPanelState('SELECTING')
     setComparisonId(null)
     setSelectedSkills(new Set())
+    setSelectedMeta(new Map())
     clearActiveRun()
     clearSelectingDraft()
   }, [])
