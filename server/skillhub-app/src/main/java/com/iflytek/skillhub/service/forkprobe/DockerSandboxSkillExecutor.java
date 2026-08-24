@@ -309,7 +309,8 @@ class DockerSandboxSkillExecutor implements SkillExecutor {
     }
 
     static String buildTaskPrompt(String skillSystemPrompt, String taskDescription, String skillName) {
-        return "下面是一个名为 \"" + skillName + "\" 的 skill 的方法论（即其 SKILL.md 的完整内容）：\n\n"
+        return ForkprobeAgentContext.SANDBOX_CONTEXT
+                + "下面是一个名为 \"" + skillName + "\" 的 skill 的方法论（即其 SKILL.md 的完整内容）：\n\n"
                 + "```markdown\n" + skillSystemPrompt + "\n```\n\n"
                 + "请按以下步骤完成任务：\n"
                 + "1. 先完整理解上面这套方法论。\n"

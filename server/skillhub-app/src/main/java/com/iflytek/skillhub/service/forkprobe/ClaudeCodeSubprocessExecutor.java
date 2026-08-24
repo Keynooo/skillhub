@@ -178,7 +178,8 @@ class ClaudeCodeSubprocessExecutor implements SkillExecutor {
     }
 
     private static String buildTaskPrompt(String taskDescription, String skillName) {
-        return "当前工作目录里有一个 SKILL.md 文件，它定义了一个名为 \"" + skillName
+        return ForkprobeAgentContext.SANDBOX_CONTEXT
+                + "当前工作目录里有一个 SKILL.md 文件，它定义了一个名为 \"" + skillName
                 + "\" 的 skill（一套完成任务的方法论/指令）。\n\n"
                 + "请遵循以下步骤：\n"
                 + "1. 先用 Read 工具读取工作目录下的 SKILL.md 文件，完整理解它的指令。\n"

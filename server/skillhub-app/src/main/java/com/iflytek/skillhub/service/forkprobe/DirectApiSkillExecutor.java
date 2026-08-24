@@ -42,13 +42,16 @@ class DirectApiSkillExecutor implements SkillExecutor {
         }
         Instant start = Instant.now();
         try {
+            // Same environment context the sandbox agents get, so platform-related
+            // tasks resolve correctly in direct-api mode too.
+            String systemPrompt = ForkprobeAgentContext.SANDBOX_CONTEXT + skillSystemPrompt;
             AnthropicMessageResponse response;
             if (target == null || !target.hasAny()) {
                 response = anthropicService.sendMessageWithRetry(
-                        skillSystemPrompt, taskDescription, maxTokens, 0);
+                        systemPrompt, taskDescription, maxTokens, 0);
             } else {
                 response = anthropicService.sendMessageWithRetry(
-                        skillSystemPrompt, taskDescription, maxTokens, 0,
+                        systemPrompt, taskDescription, maxTokens, 0,
                         target.model(), target.baseUrl(), target.apiKey());
             }
             return new SkillResult(response.content(), response.tokensUsed(), response.latencySeconds(), null);
