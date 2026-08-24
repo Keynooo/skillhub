@@ -24,7 +24,9 @@ export function SkillAppliedBadge({ skillApplied, className }: SkillAppliedBadge
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium',
+        // shrink-0 + nowrap: the badge must never compress inside a flex row —
+        // without it a narrow column wraps the text one character per line.
+        'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0',
         skillApplied ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700',
         className,
       )}

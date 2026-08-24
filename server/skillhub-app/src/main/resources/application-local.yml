@@ -6,7 +6,9 @@ spring:
   flyway:
     enabled: true
   datasource:
-    url: jdbc:postgresql://localhost:5432/skillhub
+    # 用本机 LAN IP（非 loopback）：VS Code Remote-SSH 会把 106 的 postgres 自动转发到 127.0.0.1:5432/5433，
+    # 抢占 localhost 连接导致密码认证失败。走 192.168.50.66 命中 docker 的 0.0.0.0 绑定，绕开 loopback 转发。
+    url: jdbc:postgresql://192.168.50.66:5433/skillhub
     username: skillhub
     password: skillhub_dev
   data:

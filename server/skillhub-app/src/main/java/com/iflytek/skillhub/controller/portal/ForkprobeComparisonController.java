@@ -8,6 +8,11 @@ import com.iflytek.skillhub.dto.forkprobe.CompareRequest;
 import com.iflytek.skillhub.dto.forkprobe.CompareResponse;
 import com.iflytek.skillhub.dto.forkprobe.ComparisonHistoryItem;
 import com.iflytek.skillhub.dto.forkprobe.ComparisonStatusResponse;
+import com.iflytek.skillhub.dto.forkprobe.PipelineHistoryItem;
+import com.iflytek.skillhub.dto.forkprobe.PipelineRequest;
+import com.iflytek.skillhub.dto.forkprobe.PipelineResponse;
+import com.iflytek.skillhub.dto.forkprobe.PipelineStatusResponse;
+import com.iflytek.skillhub.dto.forkprobe.AutopilotRequest;
 import com.iflytek.skillhub.dto.forkprobe.RecommendRequest;
 import com.iflytek.skillhub.dto.forkprobe.RecommendResponse;
 import com.iflytek.skillhub.dto.forkprobe.RecommendedSkill;
@@ -137,6 +142,102 @@ public class ForkprobeComparisonController extends BaseApiController {
             @RequestAttribute(value = "userId", required = false) String userId) {
         Optional<ComparisonStatusResponse> status =
                 comparisonService.getHistoryDetail(userId, comparisonId);
+        if (status.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(ok("response.success.read", status.get()));
+    }
+
+    /**
+     * Start a new skill pipeline (编排) run — three parallel lanes, each a serial
+     * chain of the skills the user picked (auto-ordered by the system).
+     */
+    @PostMapping("/pipeline")
+    @RateLimit(category = "forkprobe-pipeline", authenticated = 10, anonymous = 3, windowSeconds = 60)
+    public ApiResponse<PipelineResponse> pipeline(
+            @RequestBody @Valid PipelineRequest request,
+            @RequestAttribute(value = "userId", required = false) String userId,
+            @RequestAttribute(value = "userNsRoles", required = false) Map<Long, NamespaceRole> userNsRoles) {
+        PipelineResponse response = comparisonService.startPipeline(
+                userId,
+                request.taskDescription(),
+                request.lanes(),
+                request.provider(),
+                userNsRoles);
+        return ok("response.success.create", response);
+    }
+
+    /**
+     * Start an autopilot (AI-orchestrated) pipeline run: the user nominates a pool of
+     * 0..5 candidate skills, and an LLM orchestrator (aware of each candidate's SKILL.md)
+     * decides the actual subset + order. The resulting AI chain is polled/managed through
+     * the same pipeline endpoints as the manual run, and runs alongside a baseline lane.
+     */
+    @PostMapping("/pipeline/autopilot")
+    @RateLimit(category = "forkprobe-pipeline", authenticated = 10, anonymous = 3, windowSeconds = 60)
+    public ApiResponse<PipelineResponse> autopilot(
+            @RequestBody @Valid AutopilotRequest request,
+            @RequestAttribute(value = "userId", required = false) String userId,
+            @RequestAttribute(value = "userNsRoles", required = false) Map<Long, NamespaceRole> userNsRoles) {
+        PipelineResponse response = comparisonService.startAutopilotPipeline(
+                userId,
+                request.taskDescription(),
+                request.skillCoordinates() == null ? java.util.List.of() : request.skillCoordinates(),
+                request.provider(),
+                userNsRoles);
+        return ok("response.success.create", response);
+    }
+
+    /**
+     * Poll for pipeline status and stage results. Returns 404 if the pipeline ID
+     * doesn't exist (expired or never created).
+     */
+    @GetMapping("/pipeline/{pipelineId}")
+    public ResponseEntity<ApiResponse<PipelineStatusResponse>> pipelineStatus(
+            @PathVariable String pipelineId) {
+        Optional<PipelineStatusResponse> status = comparisonService.getPipelineStatus(pipelineId);
+        if (status.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(ok("response.success.read", status.get()));
+    }
+
+    /**
+     * Cancel an in-flight pipeline run. Idempotent — cancelling an already-finished
+     * run is a no-op.
+     */
+    @PostMapping("/pipeline/{pipelineId}/cancel")
+    public ResponseEntity<ApiResponse<PipelineStatusResponse>> pipelineCancel(
+            @PathVariable String pipelineId) {
+        boolean exists = comparisonService.cancelPipeline(pipelineId);
+        if (!exists) {
+            return ResponseEntity.notFound().build();
+        }
+        Optional<PipelineStatusResponse> status = comparisonService.getPipelineStatus(pipelineId);
+        return ResponseEntity.ok(ok("response.success.update", status.orElse(null)));
+    }
+
+    /**
+     * List the current user's persisted pipeline runs, newest first.
+     */
+    @GetMapping("/pipeline/history")
+    public ApiResponse<List<PipelineHistoryItem>> pipelineHistory(
+            @RequestAttribute(value = "userId", required = false) String userId,
+            @RequestParam(defaultValue = "20") int limit) {
+        List<PipelineHistoryItem> history = comparisonService.getPipelineHistory(userId, limit);
+        return ok("response.success.read", history);
+    }
+
+    /**
+     * Full results of a persisted pipeline run, scoped to the owning user.
+     * Returns 404 if the run doesn't exist or belongs to another user.
+     */
+    @GetMapping("/pipeline/history/{pipelineId}")
+    public ResponseEntity<ApiResponse<PipelineStatusResponse>> pipelineHistoryDetail(
+            @PathVariable String pipelineId,
+            @RequestAttribute(value = "userId", required = false) String userId) {
+        Optional<PipelineStatusResponse> status =
+                comparisonService.getPipelineHistoryDetail(userId, pipelineId);
         if (status.isEmpty()) {
             return ResponseEntity.notFound().build();
         }

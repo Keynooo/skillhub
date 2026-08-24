@@ -6,6 +6,8 @@ import com.iflytek.skillhub.config.AnthropicProperties;
 import com.iflytek.skillhub.config.ForkprobeExecutorProperties;
 import com.iflytek.skillhub.domain.forkprobe.ForkprobeComparison;
 import com.iflytek.skillhub.domain.forkprobe.ForkprobeComparisonRepository;
+import com.iflytek.skillhub.domain.forkprobe.ForkprobePipeline;
+import com.iflytek.skillhub.domain.forkprobe.ForkprobePipelineRepository;
 import com.iflytek.skillhub.domain.namespace.NamespaceRole;
 import com.iflytek.skillhub.domain.skill.service.SkillQueryService;
 import com.iflytek.skillhub.dto.SkillSummaryResponse;
@@ -14,6 +16,11 @@ import com.iflytek.skillhub.dto.forkprobe.CompareResponse;
 import com.iflytek.skillhub.dto.forkprobe.ComparisonHistoryItem;
 import com.iflytek.skillhub.dto.forkprobe.ComparisonStatusResponse;
 import com.iflytek.skillhub.dto.forkprobe.OutputFile;
+import com.iflytek.skillhub.dto.forkprobe.PipelineHistoryItem;
+import com.iflytek.skillhub.dto.forkprobe.PipelineLaneResult;
+import com.iflytek.skillhub.dto.forkprobe.PipelineResponse;
+import com.iflytek.skillhub.dto.forkprobe.PipelineStageResult;
+import com.iflytek.skillhub.dto.forkprobe.PipelineStatusResponse;
 import com.iflytek.skillhub.dto.forkprobe.RecommendedSkill;
 import com.iflytek.skillhub.dto.forkprobe.ReviewResult;
 import com.iflytek.skillhub.dto.forkprobe.ReviewScore;
@@ -106,7 +113,62 @@ public class ForkprobeComparisonService {
     private static final Set<String> RECOMMENDATION_EXCLUDED_SLUGS =
             Set.of("forkprobe", "find-skills", "skillhub-hello");
 
+    /** Tail chars of a prior stage's output handed off to the next stage. */
+    private static final int PIPELINE_HANDOFF_BUDGET = 2000;
+
+    /**
+     * Hand-off budget for an autopilot (AI-orchestrated) chain. Unlike the manual
+     * pipeline's tight tail, an autopilot stage must see essentially the whole prior
+     * stage's output so the model can make real continuation decisions — the whole
+     * point is that the AI owns the orchestration, not a narrow 2KB window.
+     */
+    private static final int AUTOPILOT_HANDOFF_BUDGET = 16000;
+
+    /**
+     * System prompt for the per-lane ordering step. Given a task and a numbered
+     * pool of skills, it returns the order in which to run them so each skill's
+     * output feeds the next. It must keep every skill — the user already chose
+     * them, so nothing is dropped here.
+     */
+    private static final String ORDER_SYSTEM_PROMPT =
+            "You are a skill ordering assistant. Given a user's task (which may be in Chinese " +
+            "or English) and a numbered list of skills, determine the order in which to run them " +
+            "so each skill's output naturally feeds the next and together they complete the task. " +
+            "You MUST use EVERY skill exactly once — do not drop any.\n\n" +
+            "Respond with STRICT JSON only (no markdown fences, no commentary). Schema:\n" +
+            "{\n" +
+            "  \"plan\": [\n" +
+            "    {\"index\": <int, the [N] number from the skill list>}\n" +
+            "  ]\n" +
+            "}\n" +
+            "The \"plan\" array lists ALL skills in EXECUTION order, each exactly once.";
+
+    /**
+     * System prompt for the autopilot orchestrator. Given a task and a numbered pool of
+     * candidate skills — each with its full SKILL.md body — it decides which skills to
+     * actually use, in what order, so each stage's output feeds the next. Unlike the
+     * manual pipeline's {@link #ORDER_SYSTEM_PROMPT}, it MAY leave skills out: the user
+     * nominated 0..5 candidates, the AI owns the final selection + sequencing.
+     */
+    private static final String AUTOPILOT_SYSTEM_PROMPT =
+            "You are an autonomous orchestrator. A user gave you a task and a pool of candidate " +
+            "skills that might help (each shown with its full methodology body). Decide which of " +
+            "these skills are actually useful for the task and the order in which to run them, so " +
+            "that each stage's output feeds the next and together they complete the task. " +
+            "You may use ALL, SOME, or NONE of the candidates — only include skills that genuinely " +
+            "help the task; do not pad the plan with irrelevant skills.\n\n" +
+            "Respond with STRICT JSON only (no markdown fences, no commentary). Schema:\n" +
+            "{\n" +
+            "  \"plan\": [\n" +
+            "    {\"index\": <int, the [N] number from the candidate list>, " +
+            "\"step\": \"<very short Chinese note on what this stage should produce or do>\"}\n" +
+            "  ]\n" +
+            "}\n" +
+            "The \"plan\" array is in EXECUTION order, each listed index at most once, using only " +
+            "indices present in the candidate list. If no candidate is useful, return {\"plan\": []}.";
+
     private final ConcurrentHashMap<String, ComparisonRun> comparisons = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, PipelineRun> pipelines = new ConcurrentHashMap<>();
     private final ScheduledExecutorService cleanupExecutor = Executors.newSingleThreadScheduledExecutor();
 
     private final SkillQueryService skillQueryService;
@@ -116,6 +178,7 @@ public class ForkprobeComparisonService {
     private final SkillExecutor skillExecutor;
     private final ExecutorService comparisonExecutor;
     private final ForkprobeComparisonRepository comparisonRepository;
+    private final ForkprobePipelineRepository pipelineRepository;
 
     private final int maxSkills;
     private final int maxSkillsCap;
@@ -138,6 +201,7 @@ public class ForkprobeComparisonService {
             ForkprobeExecutorProperties executorProperties,
             Semaphore sandboxSemaphore,
             ForkprobeComparisonRepository comparisonRepository,
+            ForkprobePipelineRepository pipelineRepository,
             @Value("${skillhub.forkprobe.max-skills:3}") int maxSkills,
             @Value("${skillhub.forkprobe.max-skills-cap:5}") int maxSkillsCap,
             @Value("${skillhub.forkprobe.comparison-ttl-minutes:30}") int comparisonTtlMinutes,
@@ -151,13 +215,14 @@ public class ForkprobeComparisonService {
         this.comparisonTtlMinutes = comparisonTtlMinutes;
         this.reviewMaxTokens = reviewMaxTokens;
         this.comparisonRepository = comparisonRepository;
+        this.pipelineRepository = pipelineRepository;
         this.skillExecutor = createSkillExecutor(
                 anthropicService, anthropicProperties, executorProperties, sandboxSemaphore);
         this.comparisonExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
-        // Periodic cleanup of stale comparisons
+        // Periodic cleanup of stale comparisons and pipelines
         this.cleanupExecutor.scheduleAtFixedRate(
-                this::cleanupStaleComparisons, 5, 5, TimeUnit.MINUTES);
+                this::cleanupStaleRuns, 5, 5, TimeUnit.MINUTES);
     }
 
     private static SkillExecutor createSkillExecutor(
@@ -1137,6 +1202,694 @@ public class ForkprobeComparisonService {
         });
         if (comparisons.size() > 100) {
             log.info("Comparison store has {} entries after cleanup", comparisons.size());
+        }
+    }
+
+    private void cleanupStaleRuns() {
+        cleanupStaleComparisons();
+        cleanupStalePipelines();
+    }
+
+    private void cleanupStalePipelines() {
+        Instant cutoff = Instant.now().minusSeconds(comparisonTtlMinutes * 60L);
+        pipelines.entrySet().removeIf(entry -> {
+            PipelineRun run = entry.getValue();
+            boolean isStale = run.getCreatedAt().isBefore(cutoff);
+            boolean isDone = run.getStatus() == PipelineRun.Status.COMPLETED
+                    || run.getStatus() == PipelineRun.Status.FAILED
+                    || run.getStatus() == PipelineRun.Status.CANCELLED;
+            return isDone && isStale;
+        });
+    }
+
+    // --- Pipeline (编排) ---
+
+    /**
+     * Order the user-selected skills within one lane, keeping all of them.
+     * <p>
+     * The user already chose the lane's skills, so this step only reorders them —
+     * it never drops one. On any failure — no LLM target, call error, unparseable
+     * or partial plan — it falls back to the user's order, so a missing LLM never
+     * regresses the feature.
+     */
+    private List<ComparisonRun.SkillSpec> orderLane(String taskDescription,
+                                                   List<ComparisonRun.SkillSpec> pool) {
+        // A single skill (or empty pool) needs no ordering decision.
+        if (pool.size() <= 1) {
+            return pool;
+        }
+        LlmTarget target = resolveRecommendationTarget();
+        if (target == null) {
+            log.info("No LLM target configured for pipeline ordering; keeping the user order");
+            return pool;
+        }
+        try {
+            String content = callOrderModel(buildOrderPrompt(taskDescription, pool), target);
+            if (content == null || content.isBlank()) {
+                return pool;
+            }
+            List<ComparisonRun.SkillSpec> ordered = parseOrder(content, pool);
+            // Only a full permutation is accepted; anything partial keeps the user order.
+            return ordered.size() == pool.size() ? ordered : pool;
+        } catch (Exception e) {
+            log.warn("Pipeline ordering failed: {}", e.getMessage());
+            return pool;
+        }
+    }
+
+    private static String buildOrderPrompt(String taskDescription,
+                                           List<ComparisonRun.SkillSpec> pool) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("任务：").append(taskDescription).append("\n\n");
+        sb.append("技能列表（[编号] 坐标 — 名称）：\n");
+        for (int i = 0; i < pool.size(); i++) {
+            ComparisonRun.SkillSpec spec = pool.get(i);
+            sb.append('[').append(i + 1).append("] ").append(spec.coordinate())
+                    .append(" — ").append(spec.name()).append('\n');
+        }
+        sb.append("请决定：这些技能按什么顺序执行（必须全部使用、每个只用一次）。");
+        return sb.toString();
+    }
+
+    /**
+     * Call the ordering model with retry on blank content, mirroring the
+     * recommendation model's blank-guard. Returns {@code null} when all attempts
+     * fail or are blank.
+     */
+    private String callOrderModel(String userMessage, LlmTarget target) {
+        int maxTokens = 1024;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                AnthropicService.AnthropicMessageResponse response = anthropicService.sendMessageWithRetry(
+                        ORDER_SYSTEM_PROMPT, userMessage, maxTokens, 0,
+                        target.model(), target.baseUrl(), target.apiKey());
+                if (response.content() != null && !response.content().isBlank()) {
+                    return response.content();
+                }
+            } catch (IOException | InterruptedException e) {
+                log.warn("Pipeline order LLM call failed (attempt {}): {}", attempt + 1, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Parse the ordering model's JSON into an ordered list of pool specs. Tolerant
+     * of leading prose / markdown fences (outermost {@code {...}}); out-of-range or
+     * duplicate indices are dropped.
+     */
+    private static List<ComparisonRun.SkillSpec> parseOrder(String content,
+                                                            List<ComparisonRun.SkillSpec> pool) {
+        try {
+            String json = content.trim();
+            int start = json.indexOf('{');
+            int end = json.lastIndexOf('}');
+            if (start < 0 || end < start) {
+                return List.of();
+            }
+            JsonNode root = objectMapper.readTree(json.substring(start, end + 1));
+            JsonNode plan = root.path("plan");
+            if (!plan.isArray()) {
+                return List.of();
+            }
+            List<ComparisonRun.SkillSpec> ordered = new ArrayList<>();
+            Set<Integer> seen = new HashSet<>();
+            for (JsonNode entry : plan) {
+                int index = entry.path("index").asInt(-1);
+                if (index < 1 || index > pool.size() || !seen.add(index)) {
+                    continue;
+                }
+                ordered.add(pool.get(index - 1));
+            }
+            return List.copyOf(ordered);
+        } catch (Exception e) {
+            log.warn("Failed to parse pipeline order response: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * Start a new pipeline (编排) run: one to three lanes, each holding the skills
+     * the user picked (0..5, unordered). The system auto-orders each lane so its
+     * skills run as a serial chain, and the lanes run in parallel. An <em>empty</em>
+     * lane is the native/baseline reference — the raw task with no skill loaded.
+     */
+    public PipelineResponse startPipeline(String userId, String taskDescription,
+                                          List<List<String>> lanes, String provider,
+                                          Map<Long, NamespaceRole> userNsRoles) {
+        if (lanes == null || lanes.isEmpty() || lanes.size() > 3) {
+            throw new IllegalArgumentException("请提供 1~3 条通道");
+        }
+        for (List<String> lane : lanes) {
+            if (lane == null) {
+                throw new IllegalArgumentException("通道不能为空");
+            }
+            if (lane.size() > maxSkillsCap) {
+                throw new IllegalArgumentException("每条通道最多选择 " + maxSkillsCap + " 个 skill");
+            }
+        }
+
+        // Resolve each lane's skills first (validates coordinates and yields specs).
+        // An empty lane runs as the native/baseline reference so the user sees a
+        // "nothing added" result alongside the skill-based lanes.
+        List<List<ComparisonRun.SkillSpec>> resolved = new ArrayList<>();
+        for (List<String> laneCoords : lanes) {
+            if (laneCoords.isEmpty()) {
+                resolved.add(List.of(baselineSpec()));
+                continue;
+            }
+            List<ComparisonRun.SkillSpec> pool = resolveSkillSpecs(laneCoords, userId, userNsRoles);
+            if (pool.isEmpty()) {
+                throw new IllegalArgumentException("没有找到任何可执行的 skill");
+            }
+            resolved.add(pool);
+        }
+
+        // Order each lane in parallel (order-only — never drops a skill).
+        List<CompletableFuture<List<ComparisonRun.SkillSpec>>> futures = resolved.stream()
+                .map(pool -> CompletableFuture.supplyAsync(
+                        () -> orderLane(taskDescription, pool), comparisonExecutor))
+                .collect(Collectors.toList());
+        List<List<ComparisonRun.SkillSpec>> ordered = futures.stream()
+                .map(CompletableFuture::join)
+                .collect(Collectors.toList());
+
+        List<PipelineRun.Lane> runLanes = new ArrayList<>();
+        for (int i = 0; i < ordered.size(); i++) {
+            runLanes.add(buildLane(i, ordered.get(i)));
+        }
+
+        PipelineRun run = new PipelineRun(
+                userId, normalizeProvider(provider), taskDescription, resolveTarget(provider), runLanes);
+        pipelines.put(run.getPipelineId(), run);
+
+        comparisonExecutor.submit(() -> executePipeline(run.getPipelineId()));
+
+        return new PipelineResponse(
+                run.getPipelineId(),
+                run.getStatus().name(),
+                run.getCreatedAt().atOffset(ZoneOffset.UTC).toString());
+    }
+
+    /**
+     * Start an autopilot (AI-orchestrated) pipeline run. The user nominates 0..5
+     * candidate skills (a single pool decoded from {@link PipelineRequest} as one
+     * lane); the orchestrator decides which to actually use and in what order, then
+     * the AI chain runs alongside a baseline/native reference lane for comparison.
+     * <p>
+     * {@code candidateCoords} empty = pure baseline run (single lane).
+     */
+    public PipelineResponse startAutopilotPipeline(String userId, String taskDescription,
+                                                   List<String> candidateCoords, String provider,
+                                                   Map<Long, NamespaceRole> userNsRoles) {
+        if (candidateCoords == null || candidateCoords.size() > maxSkillsCap) {
+            throw new IllegalArgumentException("最多选择 " + maxSkillsCap + " 个候选 skill");
+        }
+        if (taskDescription == null || taskDescription.isBlank()) {
+            throw new IllegalArgumentException("任务描述不能为空");
+        }
+
+        // Build the AI-orchestrated lane (may be empty if no candidates / all skipped).
+        List<ComparisonRun.SkillSpec> aiLane = orchestratorStageChain(
+                taskDescription, candidateCoords, userId, userNsRoles);
+
+        List<PipelineRun.Lane> runLanes = new ArrayList<>();
+        runLanes.add(buildLane(0, aiLane));
+        if (!aiLane.isEmpty()) {
+            // Baseline/native comparison lane alongside the AI chain.
+            runLanes.add(buildLane(1, List.of(baselineSpec())));
+        }
+
+        PipelineRun run = new PipelineRun(
+                userId, normalizeProvider(provider), taskDescription, resolveTarget(provider), runLanes, true);
+        pipelines.put(run.getPipelineId(), run);
+
+        comparisonExecutor.submit(() -> executePipeline(run.getPipelineId()));
+
+        return new PipelineResponse(
+                run.getPipelineId(),
+                run.getStatus().name(),
+                run.getCreatedAt().atOffset(ZoneOffset.UTC).toString());
+    }
+
+    /**
+     * Decide the actual AI-orchestrated stage chain for the autopilot run: resolve the
+     * candidates to specs, let the orchestrator pick the useful subset + order, and map
+     * the accepted plan back onto spec stages. Empty/blank resolution or a failed
+     * orchestration degrades gracefully to the full candidate set in user order.
+     */
+    private List<ComparisonRun.SkillSpec> orchestratorStageChain(
+            String taskDescription, List<String> candidateCoords,
+            String userId, Map<Long, NamespaceRole> userNsRoles) {
+        if (candidateCoords.isEmpty()) {
+            return List.of();
+        }
+        // resolveSkillSpecs validates the coordinates and yields their full SKILL.md bodies;
+        // it throws if any candidate is unreadable (a user-nominated skill must not silently vanish).
+        List<ComparisonRun.SkillSpec> pool = resolveSkillSpecs(candidateCoords, userId, userNsRoles);
+        if (pool.isEmpty()) {
+            return List.of();
+        }
+
+        LlmTarget target = resolveRecommendationTarget();
+        if (target == null) {
+            log.info("No LLM target for autopilot orchestration; keeping full candidate set in order");
+            return pool;
+        }
+        try {
+            String content = callOrderModel(buildAutopilotPrompt(taskDescription, pool), target);
+            List<ComparisonRun.SkillSpec> ordered = content == null || content.isBlank()
+                    ? List.of() : parseAutopilotPlan(content, pool);
+            // A partial/failed plan keeps the FULL candidate set (in user order) rather
+            // than silently dropping candidates the user explicitly picked.
+            if (ordered.isEmpty()) {
+                log.warn("Autopilot orchestration produced no usable plan; falling back to full candidate set");
+                return pool;
+            }
+            return ordered;
+        } catch (Exception e) {
+            log.warn("Autopilot orchestration failed: {}", e.getMessage());
+            return pool;
+        }
+    }
+
+    private static String buildAutopilotPrompt(String taskDescription,
+                                               List<ComparisonRun.SkillSpec> pool) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("任务：").append(taskDescription).append("\n\n");
+        sb.append("候选技能列表（[编号] 坐标 — 名称，附完整方法论）：\n\n");
+        for (int i = 0; i < pool.size(); i++) {
+            ComparisonRun.SkillSpec spec = pool.get(i);
+            sb.append('[').append(i + 1).append("] ").append(spec.coordinate())
+                    .append(" — ").append(spec.name()).append('\n')
+                    .append("```markdown\n").append(spec.systemPrompt()).append("\n```\n\n");
+        }
+        sb.append("请决定：实际使用哪些候选技能、按什么顺序执行（可跳过不适用的）。");
+        return sb.toString();
+    }
+
+    /**
+     * Parse the orchestrator's JSON plan into an ordered spec list. Tolerant of leading
+     * prose / markdown fences (outermost {@code {...}}); out-of-range or duplicate
+     * indices are dropped. Returns the ordered list (possibly fewer than the pool).
+     */
+    private static List<ComparisonRun.SkillSpec> parseAutopilotPlan(
+            String content, List<ComparisonRun.SkillSpec> pool) {
+        try {
+            String json = content.trim();
+            int start = json.indexOf('{');
+            int end = json.lastIndexOf('}');
+            if (start < 0 || end < start) {
+                return List.of();
+            }
+            JsonNode root = objectMapper.readTree(json.substring(start, end + 1));
+            JsonNode plan = root.path("plan");
+            if (!plan.isArray()) {
+                return List.of();
+            }
+            List<ComparisonRun.SkillSpec> ordered = new ArrayList<>();
+            Set<Integer> seen = new HashSet<>();
+            for (JsonNode entry : plan) {
+                int index = entry.path("index").asInt(-1);
+                if (index < 1 || index > pool.size() || !seen.add(index)) {
+                    continue;
+                }
+                ordered.add(pool.get(index - 1));
+            }
+            return List.copyOf(ordered);
+        } catch (Exception e) {
+            log.warn("Failed to parse autopilot plan: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private static PipelineRun.Lane buildLane(int index, List<ComparisonRun.SkillSpec> specs) {
+        List<PipelineRun.Stage> stages = new ArrayList<>();
+        for (int i = 0; i < specs.size(); i++) {
+            stages.add(new PipelineRun.Stage(i, specs.get(i)));
+        }
+        return new PipelineRun.Lane(index, stages);
+    }
+
+    /**
+     * The spec for an empty lane: the raw task run with no skill loaded, serving as
+     * the "native" reference. Mirrors the compare mode's baseline concept, but named
+     * for the pipeline's "原生" (nothing added) framing.
+     */
+    private static ComparisonRun.SkillSpec baselineSpec() {
+        return new ComparisonRun.SkillSpec(
+                "baseline", "原生输出 (Baseline)", "—",
+                DirectApiSkillExecutor.BASELINE_PROMPT, null);
+    }
+
+    /**
+     * Cancel a running/pending pipeline. Returns {@code false} if it no longer exists.
+     */
+    public boolean cancelPipeline(String pipelineId) {
+        PipelineRun run = pipelines.get(pipelineId);
+        if (run == null) {
+            return false;
+        }
+        run.cancel();
+        log.info("Pipeline {} cancelled", pipelineId);
+        return true;
+    }
+
+    /**
+     * Get the current status of a pipeline run (polling endpoint).
+     */
+    public Optional<PipelineStatusResponse> getPipelineStatus(String pipelineId) {
+        PipelineRun run = pipelines.get(pipelineId);
+        if (run == null) {
+            return Optional.empty();
+        }
+        return Optional.of(toPipelineStatusResponse(run));
+    }
+
+    /**
+     * Recent persisted pipeline runs for a user, newest first (history list).
+     */
+    public List<PipelineHistoryItem> getPipelineHistory(String userId, int limit) {
+        if (userId == null || userId.isBlank()) {
+            return List.of();
+        }
+        int capped = Math.max(1, Math.min(limit <= 0 ? 20 : limit, 50));
+        List<ForkprobePipeline> rows = pipelineRepository.findByUserIdOrderByCreatedAtDesc(
+                userId, PageRequest.of(0, capped));
+        return rows.stream().map(this::toPipelineHistoryItem).collect(Collectors.toList());
+    }
+
+    /**
+     * Full results of a persisted pipeline run, scoped to the owning user.
+     */
+    public Optional<PipelineStatusResponse> getPipelineHistoryDetail(String userId, String pipelineId) {
+        if (userId == null || userId.isBlank()) {
+            return Optional.empty();
+        }
+        Optional<ForkprobePipeline> row = pipelineRepository.findByPipelineId(pipelineId);
+        if (row.isEmpty() || !userId.equals(row.get().getUserId())) {
+            return Optional.empty();
+        }
+        return Optional.of(toPipelineStatusResponse(row.get()));
+    }
+
+    private PipelineHistoryItem toPipelineHistoryItem(ForkprobePipeline row) {
+        return new PipelineHistoryItem(
+                row.getPipelineId(),
+                row.getTaskDescription(),
+                row.getStatus(),
+                row.getProvider(),
+                (int) parseLanes(row.getLanesJson()).stream()
+                        .mapToInt(l -> l.stages().size())
+                        .sum(),
+                row.getCreatedAt() != null
+                        ? row.getCreatedAt().atOffset(ZoneOffset.UTC).toString() : null,
+                row.getCompletedAt() != null
+                        ? row.getCompletedAt().atOffset(ZoneOffset.UTC).toString() : null);
+    }
+
+    private PipelineStatusResponse toPipelineStatusResponse(ForkprobePipeline row) {
+        return new PipelineStatusResponse(
+                row.getPipelineId(),
+                row.getStatus(),
+                parseLanes(row.getLanesJson()),
+                row.getError(),
+                row.getStartedAt() != null
+                        ? row.getStartedAt().atOffset(ZoneOffset.UTC).toString() : null,
+                row.getCompletedAt() != null
+                        ? row.getCompletedAt().atOffset(ZoneOffset.UTC).toString() : null);
+    }
+
+    private PipelineStatusResponse toPipelineStatusResponse(PipelineRun run) {
+        return new PipelineStatusResponse(
+                run.getPipelineId(),
+                run.getStatus().name(),
+                buildLaneResults(run),
+                run.getError(),
+                run.getStartedAt() != null
+                        ? run.getStartedAt().atOffset(ZoneOffset.UTC).toString() : null,
+                run.getCompletedAt() != null
+                        ? run.getCompletedAt().atOffset(ZoneOffset.UTC).toString() : null);
+    }
+
+    private List<PipelineLaneResult> buildLaneResults(PipelineRun run) {
+        return run.getLanes().stream()
+                .map(lane -> new PipelineLaneResult(
+                        lane.index,
+                        lane.status.name(),
+                        lane.stages.stream().map(this::toStageResult).collect(Collectors.toList())))
+                .collect(Collectors.toList());
+    }
+
+    private PipelineStageResult toStageResult(PipelineRun.Stage stage) {
+        return new PipelineStageResult(
+                stage.index,
+                stage.spec.coordinate(),
+                stage.spec.name(),
+                stage.status.name(),
+                stage.output,
+                stage.tokensUsed,
+                stage.latencySeconds,
+                stage.skillApplied,
+                stage.appliedReason,
+                stage.error,
+                stage.spec.sourceUrl(),
+                stage.files,
+                stage.inputPreview);
+    }
+
+    void executePipeline(String pipelineId) {
+        PipelineRun run = pipelines.get(pipelineId);
+        if (run == null) return;
+
+        run.setStatus(PipelineRun.Status.RUNNING);
+        int totalStages = run.getLanes().stream().mapToInt(l -> l.stages.size()).sum();
+        log.info("Starting pipeline {}: {} lanes / {} stages for task '{}'",
+                pipelineId, run.getLanes().size(), totalStages,
+                run.getTaskDescription().length() > 50
+                        ? run.getTaskDescription().substring(0, 50) + "..."
+                        : run.getTaskDescription());
+
+        try {
+            // Three lanes run in parallel; each lane is a serial chain internally.
+            List<CompletableFuture<Void>> laneFutures = run.getLanes().stream()
+                    .map(lane -> CompletableFuture.runAsync(() -> executeLane(run, lane), comparisonExecutor))
+                    .collect(Collectors.toList());
+            CompletableFuture.allOf(laneFutures.toArray(new CompletableFuture[0])).join();
+
+            if (run.isCancelled()) {
+                run.setStatus(PipelineRun.Status.CANCELLED);
+                return;
+            }
+            boolean anyFailed = run.getLanes().stream()
+                    .anyMatch(l -> l.status == PipelineRun.StageStatus.FAILED);
+            run.setStatus(anyFailed ? PipelineRun.Status.FAILED : PipelineRun.Status.COMPLETED);
+            log.info("Pipeline {} finished", pipelineId);
+        } catch (Exception e) {
+            run.setError(e.getMessage());
+            run.setStatus(PipelineRun.Status.FAILED);
+            log.warn("Pipeline {} failed: {}", pipelineId, e.getMessage());
+        } finally {
+            persistPipelineIfTerminal(run);
+        }
+    }
+
+    /**
+     * Run one lane's serial chain: each stage's output feeds the next. A stage
+     * failure skips the rest of this lane but leaves the other lanes untouched.
+     */
+    private void executeLane(PipelineRun run, PipelineRun.Lane lane) {
+        lane.status = PipelineRun.StageStatus.RUNNING;
+        try {
+            for (int i = 0; i < lane.stages.size(); i++) {
+                if (run.isCancelled()) {
+                    failRemainingStagesInLane(lane, i);
+                    return;
+                }
+                PipelineRun.Stage stage = lane.stages.get(i);
+                stage.status = PipelineRun.StageStatus.RUNNING;
+                int handoffBudget = run.isAutopilot() ? AUTOPILOT_HANDOFF_BUDGET : PIPELINE_HANDOFF_BUDGET;
+                String input = i == 0
+                        ? run.getTaskDescription()
+                        : buildStageInput(run.getTaskDescription(), lane.stages.get(i - 1), handoffBudget);
+                stage.inputPreview = truncate(input, 500);
+
+                CompletableFuture<Void> future = CompletableFuture.runAsync(
+                        () -> executeOneStage(run, stage, input), comparisonExecutor);
+                try {
+                    future.get(10, TimeUnit.MINUTES);
+                } catch (TimeoutException e) {
+                    stage.status = PipelineRun.StageStatus.FAILED;
+                    stage.error = "阶段执行超时";
+                    failRemainingStagesInLane(lane, i + 1);
+                    future.cancel(true);
+                    lane.status = PipelineRun.StageStatus.FAILED;
+                    return;
+                }
+
+                if (stage.status == PipelineRun.StageStatus.FAILED) {
+                    failRemainingStagesInLane(lane, i + 1);
+                    lane.status = PipelineRun.StageStatus.FAILED;
+                    return;
+                }
+            }
+            lane.status = PipelineRun.StageStatus.COMPLETED;
+        } catch (Exception e) {
+            lane.status = PipelineRun.StageStatus.FAILED;
+            log.warn("Lane {} execution error: {}", lane.index, e.getMessage());
+        }
+    }
+
+    private void executeOneStage(PipelineRun run, PipelineRun.Stage stage, String input) {
+        Instant start = Instant.now();
+        try {
+            SkillExecutor.SkillResult sr = skillExecutor.execute(
+                    stage.spec.systemPrompt(), input, stage.spec.name(), run::isCancelled,
+                    run.getTarget());
+
+            stage.output = sr.output();
+            stage.tokensUsed = sr.tokensUsed();
+            stage.latencySeconds = sr.latencySeconds();
+            stage.files = sr.files();
+
+            if (sr.error() != null) {
+                stage.error = sr.error();
+                stage.status = PipelineRun.StageStatus.FAILED;
+                return;
+            }
+
+            // Verify skill usage (skip the baseline — it loads no skill, so there is
+            // nothing to verify; the flag stays null and renders no applied badge).
+            if (!"baseline".equals(stage.spec.coordinate())) {
+                Boolean applied = skillExecutor.verify(
+                        buildVerificationOutput(sr), stage.spec.name(), stage.spec.systemPrompt(), run.getTarget());
+                stage.skillApplied = applied;
+                stage.appliedReason = applied == null ? null
+                        : applied ? "技能方法已应用于输出" : "该 skill 未调用";
+            }
+            stage.status = PipelineRun.StageStatus.COMPLETED;
+        } catch (Exception e) {
+            log.warn("Stage '{}' execution error: {}", stage.spec.name(), e.getMessage());
+            float latency = (System.currentTimeMillis() - start.toEpochMilli()) / 1000.0f;
+            stage.error = e.getMessage();
+            stage.latencySeconds = latency;
+            stage.status = PipelineRun.StageStatus.FAILED;
+        }
+    }
+
+    /**
+     * Compose the handoff input for stage N+1: the original task plus the tail of
+     * the prior stage's output, instructing the model to continue rather than restart.
+     */
+    private String buildStageInput(String originalTask, PipelineRun.Stage previous, int budget) {
+        String prev = previous.output == null ? "" : previous.output;
+        return originalTask
+                + "\n\n【上一阶段产出】以下内容是由上一个技能「" + previous.spec.name()
+                + "」生成的输出。请直接在该结果的基础上继续完成原始任务，"
+                + "不要重新开始，也不要重复已经完成的工作：\n"
+                + truncateTail(prev, budget);
+    }
+
+    /**
+     * Keep the tail of {@code text} (the "continue from" semantics is tail-biased),
+     * prefixing an ellipsis marker when truncated.
+     */
+    private static String truncateTail(String text, int budget) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        if (text.length() <= budget) {
+            return text;
+        }
+        return "…(前文省略)…\n" + text.substring(text.length() - budget);
+    }
+
+    /**
+     * Mark every stage from {@code fromIndex} onward in a lane as skipped (a prior
+     * stage in that lane failed). Only affects this lane.
+     */
+    private void failRemainingStagesInLane(PipelineRun.Lane lane, int fromIndex) {
+        for (PipelineRun.Stage stage : lane.stages) {
+            if (stage.index >= fromIndex && stage.status == PipelineRun.StageStatus.PENDING) {
+                stage.status = PipelineRun.StageStatus.SKIPPED;
+                stage.error = "前序阶段失败";
+            }
+        }
+    }
+
+    private void persistPipelineIfTerminal(PipelineRun run) {
+        PipelineRun.Status status = run.getStatus();
+        if (status == PipelineRun.Status.COMPLETED
+                || status == PipelineRun.Status.FAILED
+                || status == PipelineRun.Status.CANCELLED) {
+            persistPipelineRun(run);
+        }
+    }
+
+    private void persistPipelineRun(PipelineRun run) {
+        if (run.getUserId() == null) {
+            return; // anonymous runs are not retained
+        }
+        try {
+            String lanesJson = objectMapper.writeValueAsString(buildLaneResults(run));
+            ForkprobePipeline entity = new ForkprobePipeline(
+                    run.getPipelineId(),
+                    run.getUserId(),
+                    run.getTaskDescription(),
+                    run.getProviderId(),
+                    run.getStatus().name(),
+                    lanesJson,
+                    run.getError(),
+                    run.getCreatedAt(),
+                    run.getStartedAt(),
+                    run.getCompletedAt());
+            pipelineRepository.save(entity);
+            log.info("Pipeline {} persisted with status {}", run.getPipelineId(), run.getStatus().name());
+        } catch (Exception e) {
+            log.warn("Failed to persist pipeline {}: {}", run.getPipelineId(), e.getMessage());
+        }
+    }
+
+    private List<PipelineLaneResult> parseLanes(String lanesJson) {
+        if (lanesJson == null || lanesJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode arr = objectMapper.readTree(lanesJson);
+            if (arr == null || !arr.isArray()) {
+                return List.of();
+            }
+            List<PipelineLaneResult> lanes = new ArrayList<>();
+            for (JsonNode laneNode : arr) {
+                int index = laneNode.path("index").asInt(0);
+                String status = text(laneNode, "status");
+                List<PipelineStageResult> stages = new ArrayList<>();
+                JsonNode stagesArr = laneNode.path("stages");
+                if (stagesArr.isArray()) {
+                    for (JsonNode node : stagesArr) {
+                        stages.add(new PipelineStageResult(
+                                node.path("index").asInt(0),
+                                text(node, "skillCoordinate"),
+                                text(node, "skillName"),
+                                text(node, "status"),
+                                nullableText(node, "output"),
+                                node.path("tokensUsed").asInt(0),
+                                (float) node.path("latencySeconds").asDouble(0.0),
+                                node.hasNonNull("skillApplied")
+                                        ? node.path("skillApplied").asBoolean() : null,
+                                nullableText(node, "appliedReason"),
+                                nullableText(node, "error"),
+                                nullableText(node, "sourceUrl"),
+                                parseFiles(node),
+                                nullableText(node, "inputPreview")));
+                    }
+                }
+                lanes.add(new PipelineLaneResult(index, status, stages));
+            }
+            return lanes;
+        } catch (Exception e) {
+            log.warn("Failed to parse persisted lanes: {}", e.getMessage());
+            return List.of();
         }
     }
 

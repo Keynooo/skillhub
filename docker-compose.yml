@@ -18,6 +18,8 @@ services:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
     ports:
       - "5432:5432"
+      # 本地 dev 后端走 5433，避免 VS Code Remote-SSH 转发 106 的 5432 抢占 loopback
+      - "5433:5432"
     environment:
       POSTGRES_DB: skillhub
       POSTGRES_USER: skillhub

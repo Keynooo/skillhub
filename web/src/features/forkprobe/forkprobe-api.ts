@@ -108,6 +108,61 @@ export interface ComparisonHistoryItem {
   completedAt: string | null
 }
 
+// --- Pipeline (编排) ---
+
+export interface PipelineResponse {
+  pipelineId: string
+  status: string
+  createdAt: string
+}
+
+export interface PipelineStageResult {
+  index: number
+  skillCoordinate: string
+  skillName: string
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'SKIPPED'
+  output: string | null
+  tokensUsed: number
+  latencySeconds: number
+  /** null = not verified yet, true = applied, false = not applied */
+  skillApplied: boolean | null
+  appliedReason: string | null
+  error: string | null
+  /** GitHub source URL for catalog skills; null for SkillHub skills / baseline. */
+  sourceUrl: string | null
+  /** Deliverable files the sandbox run wrote to /output (base64-encoded). */
+  files?: ForkprobeOutputFile[]
+  /** Truncated preview of what this stage received as input (task or prior stage output). */
+  inputPreview: string | null
+}
+
+export interface PipelineLaneResult {
+  /** 0-based lane number (0, 1, 2). */
+  index: number
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'SKIPPED'
+  stages: PipelineStageResult[]
+}
+
+export interface PipelineStatusResponse {
+  pipelineId: string
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+  lanes: PipelineLaneResult[]
+  error: string | null
+  startedAt: string | null
+  completedAt: string | null
+}
+
+export interface PipelineHistoryItem {
+  pipelineId: string
+  taskDescription: string
+  status: 'COMPLETED' | 'FAILED' | 'CANCELLED'
+  /** null = deployment default provider */
+  provider: string | null
+  stageCount: number
+  createdAt: string | null
+  completedAt: string | null
+}
+
 // --- Link resolution ---
 
 export type SkillLinkTarget =
@@ -210,5 +265,62 @@ export async function getComparisonHistoryDetail(
 ): Promise<ComparisonStatusResponse> {
   return fetchJson<ComparisonStatusResponse>(
     `${BASE}/history/${encodeURIComponent(comparisonId)}`,
+  )
+}
+
+// --- Pipeline API functions ---
+
+export async function startPipeline(
+  taskDescription: string,
+  lanes: string[][],
+  provider?: string,
+): Promise<PipelineResponse> {
+  return fetchJson<PipelineResponse>(`${BASE}/pipeline`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ taskDescription, lanes, provider }),
+  })
+}
+
+export async function startAutopilotPipeline(
+  taskDescription: string,
+  skillCoordinates: string[],
+  provider?: string,
+): Promise<PipelineResponse> {
+  return fetchJson<PipelineResponse>(`${BASE}/pipeline/autopilot`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ taskDescription, skillCoordinates, provider }),
+  })
+}
+
+export async function getPipelineStatus(
+  pipelineId: string,
+): Promise<PipelineStatusResponse> {
+  return fetchJson<PipelineStatusResponse>(
+    `${BASE}/pipeline/${encodeURIComponent(pipelineId)}`,
+  )
+}
+
+export async function cancelPipeline(
+  pipelineId: string,
+): Promise<PipelineStatusResponse> {
+  return fetchJson<PipelineStatusResponse>(
+    `${BASE}/pipeline/${encodeURIComponent(pipelineId)}/cancel`,
+    { method: 'POST' },
+  )
+}
+
+export async function getPipelineHistory(
+  limit = 20,
+): Promise<PipelineHistoryItem[]> {
+  return fetchJson<PipelineHistoryItem[]>(`${BASE}/pipeline/history?limit=${limit}`)
+}
+
+export async function getPipelineHistoryDetail(
+  pipelineId: string,
+): Promise<PipelineStatusResponse> {
+  return fetchJson<PipelineStatusResponse>(
+    `${BASE}/pipeline/history/${encodeURIComponent(pipelineId)}`,
   )
 }

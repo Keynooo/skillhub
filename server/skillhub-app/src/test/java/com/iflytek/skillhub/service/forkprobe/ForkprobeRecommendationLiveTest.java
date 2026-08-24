@@ -3,6 +3,7 @@ package com.iflytek.skillhub.service.forkprobe;
 import com.iflytek.skillhub.config.AnthropicProperties;
 import com.iflytek.skillhub.config.ForkprobeExecutorProperties;
 import com.iflytek.skillhub.domain.forkprobe.ForkprobeComparisonRepository;
+import com.iflytek.skillhub.domain.forkprobe.ForkprobePipelineRepository;
 import com.iflytek.skillhub.domain.skill.service.SkillQueryService;
 import com.iflytek.skillhub.dto.forkprobe.RecommendedSkill;
 import com.iflytek.skillhub.service.AnthropicService;
@@ -182,10 +183,11 @@ class ForkprobeRecommendationLiveTest {
         when(search.listRecommendCandidates(any(), any())).thenReturn(pool);
         ForkprobeExecutorProperties execProps = mock(ForkprobeExecutorProperties.class);
         ForkprobeComparisonRepository repo = mock(ForkprobeComparisonRepository.class);
+        ForkprobePipelineRepository pipelineRepo = mock(ForkprobePipelineRepository.class);
         Semaphore sem = new Semaphore(2);
 
         return new ForkprobeComparisonService(
-                skillQueryService, search, anthropic, props, execProps, sem, repo,
+                skillQueryService, search, anthropic, props, execProps, sem, repo, pipelineRepo,
                 3, 5, 30, 4096);
     }
 

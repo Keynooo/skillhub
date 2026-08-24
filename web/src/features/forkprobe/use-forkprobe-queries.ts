@@ -7,8 +7,16 @@ import {
   getForkprobeConfig,
   getComparisonHistory,
   getComparisonHistoryDetail,
+  startPipeline,
+  startAutopilotPipeline,
+  getPipelineStatus,
+  cancelPipeline,
+  getPipelineHistory,
+  getPipelineHistoryDetail,
   type ComparisonStatusResponse,
   type CompareResponse,
+  type PipelineStatusResponse,
+  type PipelineResponse,
 } from './forkprobe-api'
 
 // --- Query keys ---
@@ -22,6 +30,11 @@ export const forkprobeKeys = {
   history: () => ['forkprobe', 'history'] as const,
   historyDetail: (comparisonId: string) =>
     ['forkprobe', 'history', comparisonId] as const,
+  pipeline: (pipelineId: string) =>
+    ['forkprobe', 'pipeline', pipelineId] as const,
+  pipelineHistory: () => ['forkprobe', 'pipelineHistory'] as const,
+  pipelineHistoryDetail: (pipelineId: string) =>
+    ['forkprobe', 'pipelineHistory', pipelineId] as const,
 }
 
 // --- Config ---
@@ -131,5 +144,109 @@ export function useForkprobeHistoryDetail(comparisonId: string | null) {
     queryKey: forkprobeKeys.historyDetail(comparisonId!),
     queryFn: () => getComparisonHistoryDetail(comparisonId!),
     enabled: !!comparisonId,
+  })
+}
+
+// --- Pipeline run ---
+
+/**
+ * Mutation to start a new pipeline (编排) run — a fixed linear chain of skills.
+ */
+export function useStartPipeline() {
+  const queryClient = useQueryClient()
+
+  return useMutation<
+    PipelineResponse,
+    Error,
+    { taskDescription: string; lanes: string[][]; provider?: string }
+  >({
+    mutationFn: ({ taskDescription, lanes, provider }) =>
+      startPipeline(taskDescription, lanes, provider),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: forkprobeKeys.config })
+    },
+  })
+}
+
+/**
+ * Mutation to start an autopilot (AI-orchestrated) pipeline run — the user nominates
+ * a pool of candidate skills and the LLM orchestrator picks the subset + order.
+ */
+export function useStartAutopilotPipeline() {
+  const queryClient = useQueryClient()
+
+  return useMutation<
+    PipelineResponse,
+    Error,
+    { taskDescription: string; skillCoordinates: string[]; provider?: string }
+  >({
+    mutationFn: ({ taskDescription, skillCoordinates, provider }) =>
+      startAutopilotPipeline(taskDescription, skillCoordinates, provider),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: forkprobeKeys.config })
+    },
+  })
+}
+
+/**
+ * Poll pipeline status until a terminal state (COMPLETED / FAILED / CANCELLED).
+ * Pass `null` for pipelineId when no pipeline is running.
+ */
+export function usePipelineStatus(pipelineId: string | null) {
+  return useQuery<PipelineStatusResponse>({
+    queryKey: forkprobeKeys.pipeline(pipelineId!),
+    queryFn: () => getPipelineStatus(pipelineId!),
+    enabled: !!pipelineId,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (
+        data?.status === 'COMPLETED' ||
+        data?.status === 'FAILED' ||
+        data?.status === 'CANCELLED'
+      ) {
+        return false
+      }
+      return 2000 // poll every 2 seconds
+    },
+  })
+}
+
+/**
+ * Cancel an in-flight pipeline run.
+ */
+export function useCancelPipeline() {
+  const queryClient = useQueryClient()
+
+  return useMutation<PipelineStatusResponse, Error, string>({
+    mutationFn: (pipelineId) => cancelPipeline(pipelineId),
+    onSuccess: (data) => {
+      queryClient.setQueryData(forkprobeKeys.pipeline(data.pipelineId), data)
+    },
+  })
+}
+
+// --- Pipeline history ---
+
+/**
+ * List the current user's persisted pipeline runs, newest first.
+ */
+export function usePipelineHistory(limit = 20, enabled = true) {
+  return useQuery({
+    queryKey: forkprobeKeys.pipelineHistory(),
+    queryFn: () => getPipelineHistory(limit),
+    enabled,
+    staleTime: 30 * 1000,
+  })
+}
+
+/**
+ * Fetch the full results of a persisted pipeline run. Pass `null` when no
+ * history entry is selected.
+ */
+export function usePipelineHistoryDetail(pipelineId: string | null) {
+  return useQuery<PipelineStatusResponse>({
+    queryKey: forkprobeKeys.pipelineHistoryDetail(pipelineId!),
+    queryFn: () => getPipelineHistoryDetail(pipelineId!),
+    enabled: !!pipelineId,
   })
 }
