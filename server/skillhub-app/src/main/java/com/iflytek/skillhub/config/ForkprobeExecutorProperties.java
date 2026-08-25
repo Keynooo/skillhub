@@ -23,7 +23,7 @@ public class ForkprobeExecutorProperties {
     private String claudeCliPath = "claude";
 
     /** Per-skill execution timeout in seconds. */
-    private int timeoutSeconds = 120;
+    private int timeoutSeconds = 180;
 
     /** Maximum USD budget per skill execution (only applies to claude-cli mode). */
     private double maxBudgetUsd = 1.0;
