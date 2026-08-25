@@ -36,14 +36,14 @@ import { SkillAppliedBadge } from '@/features/forkprobe/skill-applied-badge'
 
 /** Friendly display names for the known providers; falls back to id. */
 const PROVIDER_LABELS: Record<string, string> = {
-  glm: '云端 GLM',
-  deepseek: '云端 DeepSeek',
+  glm: 'GLM',
+  deepseek: 'DeepSeek',
 }
 
 /**
  * Render a provider option. The dropdown is fixed to the three known providers
- * (云端 DeepSeek / 云端 GLM / 本地 vLLM); their availability is still controlled
- * by server config. The model name is always appended when known so the operator
+ * (DeepSeek / GLM / 本地 vLLM); their availability is still controlled by
+ * server config. The model name is always appended when known so the operator
  * can see exactly which concrete model each provider is pointed at (it changes
  * over time, e.g. deepseek-v4-flash today, pro tomorrow).
  */
