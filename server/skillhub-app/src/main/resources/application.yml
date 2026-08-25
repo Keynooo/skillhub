@@ -104,6 +104,8 @@ skillhub:
     base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
     timeout-seconds: 120
     max-retries: 2
+    # forkprobe 下拉框是否展示内置 default（云端默认）模型入口
+    show-default-provider: ${SKILLHUB_LLM_SHOW_DEFAULT:true}
     providers:
       glm:
         base-url: ${SKILLHUB_LLM_PROVIDER_GLM_BASE_URL:}

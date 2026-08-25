@@ -320,9 +320,12 @@ export function ForkprobeWorkbenchPage() {
                     <SelectValue placeholder={t('forkprobe.selectModel')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="default">
-                      {providerLabel('deepseek', config?.defaultModel ?? '', t('forkprobe.providerLocal'))}
-                    </SelectItem>
+                    {/* default（云端默认）入口由服务端 showDefault 开关控制显隐 */}
+                    {(config?.showDefault ?? true) && (
+                      <SelectItem value="default">
+                        {providerLabel('deepseek', config?.defaultModel ?? '', t('forkprobe.providerLocal'))}
+                      </SelectItem>
+                    )}
                     {config?.providers.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {providerLabel(p.id, p.model, t('forkprobe.providerLocal'))}

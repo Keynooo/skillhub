@@ -560,6 +560,7 @@ public class ForkprobeComparisonService {
         config.put("maxSkillsCap", maxSkillsCap);
         config.put("apiKeyConfigured", anthropicService.isAvailable());
         config.put("defaultModel", anthropicProperties.getModel() == null ? "" : anthropicProperties.getModel());
+        config.put("showDefault", anthropicProperties.isShowDefaultProvider());
         config.put("providers", anthropicProperties.getProviders().entrySet().stream()
                 .filter(e -> e.getValue().isConfigured())
                 .map(e -> Map.of(

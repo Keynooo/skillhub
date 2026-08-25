@@ -82,6 +82,13 @@ public class AnthropicProperties {
     /** Number of retries on transient failures. */
     private int maxRetries = 2;
 
+    /**
+     * Whether the forkprobe model dropdown shows the built-in "default" entry
+     * (this default Anthropic-compatible endpoint). Operators can hide it via
+     * SKILLHUB_LLM_SHOW_DEFAULT=false so only named providers are selectable.
+     */
+    private boolean showDefaultProvider = true;
+
     public String getApiKey() {
         return apiKey;
     }
@@ -136,6 +143,14 @@ public class AnthropicProperties {
 
     public void setMaxRetries(int maxRetries) {
         this.maxRetries = maxRetries;
+    }
+
+    public boolean isShowDefaultProvider() {
+        return showDefaultProvider;
+    }
+
+    public void setShowDefaultProvider(boolean showDefaultProvider) {
+        this.showDefaultProvider = showDefaultProvider;
     }
 
     public boolean isApiKeyConfigured() {

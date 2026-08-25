@@ -242,6 +242,19 @@ export function useForkprobeWorkbench(
     }
   }, [panelState, recommendQuery.isSuccess])
 
+  // 配置加载后校正模型选择：当前选中项不在可选项（default 开关 + providers）里时，
+  // 回落到第一个可选项，避免下拉框显示空值
+  useEffect(() => {
+    if (!config) return
+    const available = [
+      ...((config.showDefault ?? true) ? ['default'] : []),
+      ...config.providers.map((p) => p.id),
+    ]
+    if (available.length > 0 && !available.includes(provider)) {
+      setProvider(available[0])
+    }
+  }, [config, provider])
+
   // RUNNING → COMPLETED when comparison reaches a terminal state
   const statusData = statusQuery.data
   useEffect(() => {

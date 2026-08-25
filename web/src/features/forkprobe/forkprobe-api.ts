@@ -96,6 +96,8 @@ export interface ForkprobeConfig {
   apiKeyConfigured: boolean
   /** The deployment's default model name (e.g. deepseek-v4-pro). */
   defaultModel: string
+  /** Whether the dropdown shows the built-in default model entry. */
+  showDefault?: boolean
   /** Alternate LLM providers the user can select per run (empty model = unknown). */
   providers: ForkprobeProvider[]
 }
