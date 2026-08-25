@@ -1,4 +1,6 @@
 FROM node:22-alpine AS build
+# corepack 下载 pnpm 本体也走 npm registry，默认 npmjs.org 国内超时，切淘宝镜像
+ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 RUN corepack enable
 # 国内网络：pnpm 默认从 npmjs.org 拉包会超时，写 .npmrc 切淘宝镜像
 # 环境变量 npm_config_registry 对 frozen-lockfile 也生效
