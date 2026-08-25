@@ -41,16 +41,14 @@ const PROVIDER_LABELS: Record<string, string> = {
 }
 
 /**
- * Render a provider option. The dropdown is deliberately fixed to the three
- * known providers (云端 DeepSeek / 云端 GLM / 本地 vLLM); their availability
- * is still controlled by server config, but the labels never leak the raw
- * provider id or a misleading "DeepSeek · vllm-*" combo. The local vLLM entry
- * omits the model suffix since the model is served by the local endpoint and
- * "本地 vLLM · vllm-deepseek-*" is redundant.
+ * Render a provider option. The dropdown is fixed to the three known providers
+ * (云端 DeepSeek / 云端 GLM / 本地 vLLM); their availability is still controlled
+ * by server config. The model name is always appended when known so the operator
+ * can see exactly which concrete model each provider is pointed at (it changes
+ * over time, e.g. deepseek-v4-flash today, pro tomorrow).
  */
 function providerLabel(id: string, model: string, localLabel: string): string {
-  if (id === 'local') return localLabel
-  const base = PROVIDER_LABELS[id] ?? id
+  const base = id === 'local' ? localLabel : PROVIDER_LABELS[id] ?? id
   return model ? `${base} · ${model}` : base
 }
 
