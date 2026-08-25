@@ -1674,6 +1674,8 @@
     "deleteSelected": "Delete ({{n}})",
     "deleteHistoryTitle": "Delete comparison history",
     "deleteHistoryConfirm": "Delete the selected {{n}} run(s)? This cannot be undone.",
-    "select": "Select"
+    "select": "Select",
+    "needsNetwork": "Needs internet",
+    "needsNetworkHint": "Needs internet · sandbox uses direct connection, retrieval may be slow or time out"
   }
 }

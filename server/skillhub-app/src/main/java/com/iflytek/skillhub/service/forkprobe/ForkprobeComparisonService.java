@@ -196,6 +196,7 @@ public class ForkprobeComparisonService {
             List<RecommendedSkill> llm = recommendViaLlm(taskDescription, maxCandidates, userId, userNsRoles);
             if (!llm.isEmpty()) {
                 candidates.addAll(llm);
+                enrichNetworkFlags(candidates, userId, userNsRoles);
                 return candidates;
             }
             log.warn("LLM recommendation produced no candidates; falling back to lexical-hash ranking");
@@ -215,7 +216,45 @@ public class ForkprobeComparisonService {
             log.warn("Platform skill recommendation failed: {}", e.getMessage());
         }
 
+        enrichNetworkFlags(candidates, userId, userNsRoles);
         return candidates;
+    }
+
+    /**
+     * Flag candidates whose SKILL.md drives the agent to the live web (search/fetch/
+     * crawl). The comparison sandbox runs on a direct bridge network with no proxy, so
+     * these skills are prone to slow runs or timeouts — the UI badges them as 需联网.
+     * Best-effort: any load failure leaves the flag false.
+     */
+    private void enrichNetworkFlags(List<RecommendedSkill> candidates, String userId,
+                                    Map<Long, NamespaceRole> userNsRoles) {
+        for (int i = 0; i < candidates.size(); i++) {
+            RecommendedSkill c = candidates.get(i);
+            if ("baseline".equals(c.coordinate()) || c.coordinate().startsWith("catalog:")) {
+                continue;
+            }
+            String[] parts = c.coordinate().split("/", 2);
+            if (parts.length != 2) {
+                continue;
+            }
+            try {
+                String skillMd = loadSkillHubPrompt(parts[0], parts[1], userId, userNsRoles);
+                if (looksNetworkBound(skillMd)) {
+                    candidates.set(i, c.withNeedsNetwork(true));
+                }
+            } catch (Exception e) {
+                log.debug("needsNetwork probe failed for {}: {}", c.coordinate(), e.getMessage());
+            }
+        }
+    }
+
+    /** Strong live-web signals in a SKILL.md (calibrated to avoid over-flagging). */
+    private static final java.util.regex.Pattern NETWORK_BOUND = java.util.regex.Pattern.compile(
+            "联网|互联网|在线检索|在线搜索|搜索引擎|爬虫|websearch|webfetch|web search|web_search|web_fetch|jina|crawl",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    static boolean looksNetworkBound(String skillMd) {
+        return skillMd != null && NETWORK_BOUND.matcher(skillMd).find();
     }
 
     /**
@@ -371,7 +410,7 @@ public class ForkprobeComparisonService {
         String reasonZh = reason != null && !reason.isBlank()
                 ? truncateSummary(reason, 20)
                 : (c.summary() != null && !c.summary().isBlank() ? c.summary() : "平台技能，可直接加入对比");
-        return new RecommendedSkill(coordinate, name, namespace, reasonZh, "skillhub", "skillhub", 0, null);
+        return new RecommendedSkill(coordinate, name, namespace, reasonZh, "skillhub", "skillhub", 0, null, false);
     }
 
     static String truncateSummary(String text, int maxChars) {
@@ -398,7 +437,7 @@ public class ForkprobeComparisonService {
                 ? skill.summary() : "平台技能，可直接加入对比";
         int stars = skill.starCount() != null ? skill.starCount() : 0;
         return new RecommendedSkill(
-                coordinateOf(skill), name, namespace, reasonZh, "skillhub", "skillhub", stars, null);
+                coordinateOf(skill), name, namespace, reasonZh, "skillhub", "skillhub", stars, null, false);
     }
 
     private String coordinateOf(SkillSummaryResponse skill) {
@@ -1137,7 +1176,7 @@ public class ForkprobeComparisonService {
     private RecommendedSkill baselineSkill() {
         return new RecommendedSkill(
                 "baseline", "基准参照 (Baseline)", "—",
-                "不加载任何 skill 的原始模型输出，作为对比基准", "baseline", "baseline", 0, null);
+                "不加载任何 skill 的原始模型输出，作为对比基准", "baseline", "baseline", 0, null, false);
     }
 
     private void cleanupStaleComparisons() {

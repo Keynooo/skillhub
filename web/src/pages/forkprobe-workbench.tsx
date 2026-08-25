@@ -388,15 +388,27 @@ export function ForkprobeWorkbenchPage() {
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex-1 min-w-0">
-                            <div
-                              className="font-medium truncate"
-                              style={{ color: 'hsl(var(--foreground))' }}
-                            >
-                              {skill.name}
+                            <div className="flex items-center gap-1.5">
+                              <div
+                                className="font-medium truncate"
+                                style={{ color: 'hsl(var(--foreground))' }}
+                              >
+                                {skill.name}
+                              </div>
+                              {skill.needsNetwork && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium shrink-0">
+                                  {t('forkprobe.needsNetwork')}
+                                </span>
+                              )}
                             </div>
                             <div className="text-xs text-muted-foreground truncate mt-0.5">
                               {skill.reasonZh || skill.source}
                             </div>
+                            {skill.needsNetwork && (
+                              <div className="text-xs text-amber-600 truncate mt-0.5">
+                                {t('forkprobe.needsNetworkHint')}
+                              </div>
+                            )}
                           </div>
                           <div
                             className={cn(

@@ -142,6 +142,7 @@ function SkillCheckbox({
   onToggle: () => void
   showReason?: boolean
 }) {
+  const { t } = useTranslation()
   return (
     <button
       type="button"
@@ -192,7 +193,17 @@ function SkillCheckbox({
               CATALOG
             </span>
           )}
+          {skill.needsNetwork && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">
+              {t('forkprobe.needsNetwork')}
+            </span>
+          )}
         </div>
+        {skill.needsNetwork && (
+          <p className="text-xs mt-0.5 text-amber-600">
+            {t('forkprobe.needsNetworkHint')}
+          </p>
+        )}
         {showReason && skill.reasonZh && (
           <p
             className="text-xs mt-0.5 line-clamp-1"

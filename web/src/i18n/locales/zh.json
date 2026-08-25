@@ -1674,6 +1674,8 @@
     "deleteSelected": "删除（{{n}}）",
     "deleteHistoryTitle": "删除对比记录",
     "deleteHistoryConfirm": "确定删除选中的 {{n}} 条对比记录吗？删除后不可恢复。",
-    "select": "选择"
+    "select": "选择",
+    "needsNetwork": "需联网",
+    "needsNetworkHint": "需联网 · 沙盒直连，检索较慢可能超时"
   }
 }

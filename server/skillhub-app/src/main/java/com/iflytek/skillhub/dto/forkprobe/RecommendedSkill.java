@@ -26,5 +26,19 @@ public record RecommendedSkill(
         int stars,
 
         /** GitHub source URL for catalog skills; null for SkillHub skills / baseline. */
-        String sourceUrl
-) {}
+        String sourceUrl,
+
+        /**
+         * True when the skill's SKILL.md drives the agent to the live web
+         * (search/fetch/crawl). The comparison sandbox runs on a direct bridge
+         * network with no proxy, so these skills are prone to slow runs or
+         * timeouts — the UI shows a "需联网" badge.
+         */
+        boolean needsNetwork
+) {
+    /** Copy with a different needsNetwork flag. */
+    public RecommendedSkill withNeedsNetwork(boolean value) {
+        return new RecommendedSkill(coordinate, name, namespace, reasonZh, domain, source,
+                stars, sourceUrl, value);
+    }
+}

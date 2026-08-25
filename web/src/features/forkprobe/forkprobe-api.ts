@@ -12,6 +12,9 @@ export interface RecommendedSkill {
   stars: number
   /** GitHub source URL for catalog skills; null for SkillHub skills / baseline. */
   sourceUrl: string | null
+  /** True when the skill drives the agent to the live web — sandbox has no proxy,
+   *  so these may run slow or time out. Absent for manually-added skills. */
+  needsNetwork?: boolean
 }
 
 export interface RecommendResponse {
