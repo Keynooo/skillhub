@@ -11,6 +11,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Field;
 import java.nio.file.Path;
@@ -284,6 +286,70 @@ class SecurityScanServiceTest {
 
         assertThat(completed.isDeleted()).isFalse();
         verify(auditRepository, org.mockito.Mockito.never()).save(completed);
+    }
+
+    @Test
+    void triggerScan_insideTransaction_defersPublishUntilAfterCommit() throws Exception {
+        SkillVersion version = new SkillVersion(8L, "1.0.0", "publisher-1");
+        setId(version, 42L);
+        PackageEntry entry = new PackageEntry(
+                "README.md",
+                "# demo".getBytes(),
+                6L,
+                "text/markdown"
+        );
+
+        given(skillVersionRepository.findById(42L)).willReturn(Optional.of(version));
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.triggerScan(42L, List.of(entry), "publisher-1");
+
+            // The placeholder audit is not visible to other transactions yet, so the task
+            // must not reach the stream before commit (regression: version stuck SCANNING
+            // because a fast consumer failed with "SecurityAudit not found").
+            verify(scanTaskProducer, org.mockito.Mockito.never())
+                    .publishScanTask(org.mockito.ArgumentMatchers.any(ScanTask.class));
+
+            for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+                synchronization.afterCommit();
+            }
+
+            ArgumentCaptor<ScanTask> taskCaptor = ArgumentCaptor.forClass(ScanTask.class);
+            verify(scanTaskProducer).publishScanTask(taskCaptor.capture());
+            assertThat(taskCaptor.getValue().versionId()).isEqualTo(42L);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void triggerScan_afterCommitPublishFailure_isLoggedNotRethrown() throws Exception {
+        SkillVersion version = new SkillVersion(8L, "1.0.0", "publisher-1");
+        setId(version, 42L);
+        PackageEntry entry = new PackageEntry(
+                "README.md",
+                "# demo".getBytes(),
+                6L,
+                "text/markdown"
+        );
+
+        given(skillVersionRepository.findById(42L)).willReturn(Optional.of(version));
+        org.mockito.Mockito.doThrow(new IllegalStateException("redis down"))
+                .when(scanTaskProducer)
+                .publishScanTask(org.mockito.ArgumentMatchers.any(ScanTask.class));
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.triggerScan(42L, List.of(entry), "publisher-1");
+
+            for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+                // Must not propagate: the transaction is already committed by this point.
+                synchronization.afterCommit();
+            }
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     private void setId(Object target, Long id) throws Exception {

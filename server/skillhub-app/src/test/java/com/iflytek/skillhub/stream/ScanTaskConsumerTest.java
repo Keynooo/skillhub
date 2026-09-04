@@ -347,6 +347,11 @@ class ScanTaskConsumerTest {
             return stream;
         }
 
+        @Override
+        protected Duration retryDelay(int retryCount) {
+            return Duration.ZERO;
+        }
+
         private void invokeProcessBusiness(ScanTaskPayload payload) {
             processBusiness(payload);
         }

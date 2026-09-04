@@ -171,6 +171,11 @@ class ScanTaskConsumerLoggingTest {
         protected RStream<String, String> createStream() {
             return stream;
         }
+
+        @Override
+        protected Duration retryDelay(int retryCount) {
+            return Duration.ZERO;
+        }
     }
 
     private static final class FailingScanner implements SecurityScanner {

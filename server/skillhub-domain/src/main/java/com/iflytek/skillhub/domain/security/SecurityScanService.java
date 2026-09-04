@@ -12,6 +12,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -75,7 +77,7 @@ public class SecurityScanService {
         }
         // Always create a new audit record — supports multiple rounds per version
         auditRepository.save(new SecurityAudit(versionId, ScannerType.SKILL_SCANNER));
-        scanTaskProducer.publishScanTask(new ScanTask(
+        ScanTask task = new ScanTask(
                 UUID.randomUUID().toString(),
                 versionId,
                 packagePath,
@@ -83,7 +85,12 @@ public class SecurityScanService {
                 publisherId,
                 System.currentTimeMillis(),
                 Map.of("scannerType", ScannerType.SKILL_SCANNER.getValue())
-        ));
+        );
+        // The placeholder audit above is only visible to other transactions after this one
+        // commits. Publishing inside the transaction lets a fast consumer process the task
+        // before commit and fail with "SecurityAudit not found" (observed on 2026-09-04,
+        // versionId=72 stuck in SCANNING). Defer the publish until afterCommit.
+        publishAfterCommit(task);
         // Only transition to SCANNING if the version is not already published (auto-publish flow)
         if (version.getStatus() != SkillVersionStatus.PUBLISHED) {
             version.setStatus(SkillVersionStatus.SCANNING);
@@ -138,6 +145,26 @@ public class SecurityScanService {
                     audit.markAsDeleted();
                     auditRepository.save(audit);
                 });
+    }
+
+    private void publishAfterCommit(ScanTask task) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            scanTaskProducer.publishScanTask(task);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    scanTaskProducer.publishScanTask(task);
+                } catch (Exception e) {
+                    // The transaction is already committed; failing the caller now would be
+                    // misleading. The version stays in SCANNING and can be re-triggered.
+                    log.error("Failed to publish scan task after commit: taskId={}, versionId={}",
+                            task.taskId(), task.versionId(), e);
+                }
+            }
+        });
     }
 
     private Path saveTempDirectory(Long versionId, List<PackageEntry> entries) {

@@ -30,6 +30,8 @@ public abstract class AbstractStreamConsumer<T> {
     private static final int MAX_RETRY_COUNT = 3;
     private static final int READ_BATCH_SIZE = 10;
     private static final Duration POLL_TIMEOUT = Duration.ofSeconds(2);
+    private static final Duration RETRY_BASE_DELAY = Duration.ofSeconds(2);
+    private static final Duration RETRY_MAX_DELAY = Duration.ofSeconds(30);
 
     private final RedissonClient redissonClient;
     private final String streamKey;
@@ -215,12 +217,32 @@ public abstract class AbstractStreamConsumer<T> {
 
     private void handleFailure(T payload, int retryCount, Exception e) {
         if (retryCount < MAX_RETRY_COUNT) {
+            sleepBeforeRetry(retryCount);
             retryMessage(payload, retryCount + 1);
             return;
         }
         markFailed(payload, truncateError(
                 taskDisplayName() + " failed (retried " + retryCount + " times): " + e.getMessage()
         ));
+    }
+
+    /**
+     * Exponential backoff before republishing: 2s, 4s, 8s (capped at {@link #RETRY_MAX_DELAY}).
+     * Immediate retries burn all attempts inside a transient failure window — e.g. a producer
+     * transaction that has not committed yet — and never give the system time to recover.
+     */
+    private void sleepBeforeRetry(int retryCount) {
+        long delayMillis = retryDelay(retryCount).toMillis();
+        try {
+            Thread.sleep(delayMillis);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    protected Duration retryDelay(int retryCount) {
+        long shifted = RETRY_BASE_DELAY.toMillis() << Math.min(retryCount, 10);
+        return Duration.ofMillis(Math.min(shifted, RETRY_MAX_DELAY.toMillis()));
     }
 
     protected int parseRetryCount(Map<String, String> data) {

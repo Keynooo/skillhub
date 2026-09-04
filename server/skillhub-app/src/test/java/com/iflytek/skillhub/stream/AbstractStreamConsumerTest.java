@@ -105,6 +105,18 @@ class AbstractStreamConsumerTest {
     }
 
     @Test
+    void retryDelay_growsExponentiallyAndIsCapped() {
+        @SuppressWarnings("unchecked")
+        RStream<String, String> stream = mock(RStream.class);
+        BackoffConsumer consumer = new BackoffConsumer(stream);
+
+        assertThat(consumer.exposedRetryDelay(0)).isEqualTo(Duration.ofSeconds(2));
+        assertThat(consumer.exposedRetryDelay(1)).isEqualTo(Duration.ofSeconds(4));
+        assertThat(consumer.exposedRetryDelay(2)).isEqualTo(Duration.ofSeconds(8));
+        assertThat(consumer.exposedRetryDelay(10)).isEqualTo(Duration.ofSeconds(30));
+    }
+
+    @Test
     void detectsBusyGroupWhenWrappedInRedisSystemException() {
         RedisSystemException wrapped = new RedisSystemException(
                 "Error in execution",
@@ -144,6 +156,11 @@ class AbstractStreamConsumerTest {
         }
 
         @Override
+        protected Duration retryDelay(int retryCount) {
+            return Duration.ZERO;
+        }
+
+        @Override
         protected String payloadIdentifier(String payload) {
             return payload;
         }
@@ -157,6 +174,57 @@ class AbstractStreamConsumerTest {
             if (fail) {
                 throw new IllegalStateException("boom");
             }
+        }
+
+        @Override
+        protected void markCompleted(String payload) {
+        }
+
+        @Override
+        protected void markFailed(String payload, String error) {
+        }
+
+        @Override
+        protected void retryMessage(String payload, int retryCount) {
+        }
+    }
+
+    // Does NOT override retryDelay, so it exercises the base-class backoff defaults.
+    private static final class BackoffConsumer extends AbstractStreamConsumer<String> {
+        private BackoffConsumer(RStream<String, String> stream) {
+            super(mock(RedissonClient.class), "scan-stream", "scan-group", true, Duration.ofMinutes(2), 20, Duration.ofSeconds(30));
+        }
+
+        private Duration exposedRetryDelay(int retryCount) {
+            return retryDelay(retryCount);
+        }
+
+        @Override
+        protected String taskDisplayName() {
+            return "Test";
+        }
+
+        @Override
+        protected String consumerPrefix() {
+            return "test";
+        }
+
+        @Override
+        protected String parsePayload(String messageId, Map<String, String> data) {
+            return data.get("payload");
+        }
+
+        @Override
+        protected String payloadIdentifier(String payload) {
+            return payload;
+        }
+
+        @Override
+        protected void markProcessing(String payload) {
+        }
+
+        @Override
+        protected void processBusiness(String payload) {
         }
 
         @Override
